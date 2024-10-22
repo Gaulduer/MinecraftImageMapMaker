@@ -67,14 +67,17 @@ struct Marker* LL_removeHead(struct LinkedList *ll) {
     return m;
 }
 
-struct Marker* LL_remove(struct LinkedList *ll, struct Node *prev, struct Node *remove) {
+struct Marker* LL_remove(struct LinkedList *ll, struct Node *prev, struct Node **r) {
+    struct Node *remove = *r;
     struct Marker *m = remove->marker;
-    if(prev == NULL)
+    if(prev == NULL) {
+        *r = ll->head->next; /* Since prev is NULL, r should become the new head after LL_removeHead */
         return LL_removeHead(ll);
-    prev->next = remove->next;
-    if(remove == ll->tail) {
-        ll->tail = prev;
     }
+    prev->next = remove->next;
+    *r = prev->next; /* The node r is pointing to should become the node after prev */
+    if(remove == ll->tail)
+        ll->tail = prev;
     free(remove);
     return m;
 }
