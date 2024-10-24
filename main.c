@@ -28,6 +28,8 @@ Timeline:
 void inputCommands() {
     FILE *commands = fopen("commands.txt", "r");
     INPUT ip;
+    HWND selectedWindow;
+    WCHAR name[128];
     char command[512];
     const size_t len = 512 + 1;
 
@@ -36,7 +38,14 @@ void inputCommands() {
     ip.ki.time = 0;
     ip.ki.dwExtraInfo = 0;
 
-    Sleep(5000);
+    GetAsyncKeyState(VK_CONTROL); /* In case control was pressed before. */
+    while(!GetAsyncKeyState(VK_CONTROL));
+    selectedWindow = GetForegroundWindow();
+    GetWindowTextW(selectedWindow, name, 128);
+    printf("Selected Window - %ls\n", name);
+
+    Sleep(1000);
+
 	while(fgets(command, 512, commands)) {
 		const size_t len = strlen(command) + 1;
 	    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
@@ -47,47 +56,19 @@ void inputCommands() {
 		SetClipboardData(CF_TEXT, hMem);
 		CloseClipboard();
 
-        if(GetAsyncKeyState(VK_RIGHT) != 0)
-            while(GetAsyncKeyState(VK_RIGHT) == 0);
+        if(GetAsyncKeyState(VK_RIGHT))
+            while(!GetAsyncKeyState(VK_RIGHT));
 
-        Sleep(50);
+        SendMessageW(selectedWindow, WM_KEYDOWN, 'T', 0);
 
-		ip.ki.wVk = 'T';
-		ip.ki.dwFlags =	0;
-		SendInput(1, &ip, sizeof(INPUT));
+        Sleep(20);
 
-		ip.ki.wVk = 'T';
-		ip.ki.dwFlags = KEYEVENTF_KEYUP;
-		SendInput(1, &ip, sizeof(INPUT));
+        SendMessageW(selectedWindow, WM_KEYDOWN, VK_CONTROL, 0);
 
-        Sleep(100);
+        SendMessageW(selectedWindow, WM_KEYDOWN, 'V', 0);
 
-		ip.ki.wVk = VK_CONTROL;
-		ip.ki.dwFlags = 0;
-		SendInput(1, &ip, sizeof(INPUT));
-
-		ip.ki.wVk = 'V';
-		ip.ki.dwFlags =	0;
-		SendInput(1, &ip, sizeof(INPUT));
-
-		ip.ki.wVk = 'V';
-		ip.ki.dwFlags =	KEYEVENTF_KEYUP;
-		SendInput(1, &ip, sizeof(INPUT));
-
-		ip.ki.wVk = VK_CONTROL;
-		ip.ki.dwFlags = KEYEVENTF_KEYUP;
-		SendInput(1, &ip, sizeof(INPUT));
-
-		Sleep(100);
-
-		ip.ki.wVk = VK_RETURN;
-		ip.ki.dwFlags =	0;
-		SendInput(1, &ip, sizeof(INPUT));
-
-		ip.ki.wVk = VK_RETURN;
-		ip.ki.dwFlags = KEYEVENTF_KEYUP;
-		SendInput(1, &ip, sizeof(INPUT));
-	}
+        SendMessageW(selectedWindow, WM_KEYDOWN, VK_RETURN, 0);
+    }
 
     fclose(commands);
 }
@@ -409,6 +390,45 @@ void readImage(HDC hdc, int scale, char *image, char *key) {
     free(colors);
 }
 
+void inputTest() {
+    HWND selectedWindow;
+    char command[512] = "Hello world!";
+
+    GetAsyncKeyState(VK_CONTROL); /* In case control was pressed before. */
+    while(!GetAsyncKeyState(VK_CONTROL));
+    while(GetAsyncKeyState(VK_CONTROL));
+    selectedWindow = GetForegroundWindow();
+
+    const size_t len = strlen(command) + 1;
+	HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+    memcpy(GlobalLock(hMem), command, strlen(command) + 1);
+	GlobalUnlock(hMem);
+	OpenClipboard(0);
+	EmptyClipboard();
+	SetClipboardData(CF_TEXT, hMem);
+	CloseClipboard();
+
+	SendMessageW(selectedWindow, WM_KEYDOWN, 'T', 0);
+
+    Sleep(70);
+
+    SendMessageW(selectedWindow, WM_KEYDOWN, VK_CONTROL, 0);
+
+    SendMessageW(selectedWindow, WM_KEYDOWN, 'V', 0);
+
+    SendMessageW(selectedWindow, WM_KEYDOWN, VK_RETURN, 0);
+
+    SendMessageW(selectedWindow, WM_KEYDOWN, 'T', 0);
+
+    Sleep(20);
+
+    SendMessageW(selectedWindow, WM_KEYDOWN, VK_CONTROL, 0);
+
+    SendMessageW(selectedWindow, WM_KEYDOWN, 'V', 0);
+
+    SendMessageW(selectedWindow, WM_KEYDOWN, VK_RETURN, 0);
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int cmdShow) {
     WNDCLASSW wc = {};
     wc.lpfnWndProc = WindowProc;
@@ -421,7 +441,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
     CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 256, 528, 100, hwnd, 0, NULL, NULL);
 
     readImage(GetDC(hwnd), 2, "gurt.bmp", "colorKeys\\all.csv");
-    //quadTest2();
+    //inputTest();
 
     MSG msg = {};
     msg.hwnd = hwnd;
