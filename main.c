@@ -14,6 +14,7 @@ Timeline:
 20241014 - Added a way to optimize quad function commands
 20241017 - Horizontal priority optimization added.
 20241023 - Changed logic back to logic that was working previously.
+20241023 - Improved command input method.
 */
 
 #include <windows.h>
@@ -61,7 +62,7 @@ void inputCommands() {
 
         SendMessageW(selectedWindow, WM_KEYDOWN, 'T', 0);
 
-        Sleep(20);
+        Sleep(70);
 
         SendMessageW(selectedWindow, WM_KEYDOWN, VK_CONTROL, 0);
 
@@ -388,45 +389,6 @@ void readImage(HDC hdc, int scale, char *image, char *key) {
     for(i = 0 ; colors[i] != NULL ; i++)
         free(colors[i]);
     free(colors);
-}
-
-void inputTest() {
-    HWND selectedWindow;
-    char command[512] = "Hello world!";
-
-    GetAsyncKeyState(VK_CONTROL); /* In case control was pressed before. */
-    while(!GetAsyncKeyState(VK_CONTROL));
-    while(GetAsyncKeyState(VK_CONTROL));
-    selectedWindow = GetForegroundWindow();
-
-    const size_t len = strlen(command) + 1;
-	HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
-    memcpy(GlobalLock(hMem), command, strlen(command) + 1);
-	GlobalUnlock(hMem);
-	OpenClipboard(0);
-	EmptyClipboard();
-	SetClipboardData(CF_TEXT, hMem);
-	CloseClipboard();
-
-	SendMessageW(selectedWindow, WM_KEYDOWN, 'T', 0);
-
-    Sleep(70);
-
-    SendMessageW(selectedWindow, WM_KEYDOWN, VK_CONTROL, 0);
-
-    SendMessageW(selectedWindow, WM_KEYDOWN, 'V', 0);
-
-    SendMessageW(selectedWindow, WM_KEYDOWN, VK_RETURN, 0);
-
-    SendMessageW(selectedWindow, WM_KEYDOWN, 'T', 0);
-
-    Sleep(20);
-
-    SendMessageW(selectedWindow, WM_KEYDOWN, VK_CONTROL, 0);
-
-    SendMessageW(selectedWindow, WM_KEYDOWN, 'V', 0);
-
-    SendMessageW(selectedWindow, WM_KEYDOWN, VK_RETURN, 0);
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int cmdShow) {
