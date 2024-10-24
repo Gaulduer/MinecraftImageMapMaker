@@ -11,8 +11,9 @@ Timeline:
 20240816 - Much deliberation made over command generation methods.
 20240904 - Begin button is now functional, triggering inputCommands instead of having it run automatically.
 20240922 - Added a quad function to help with commands.
-20241014 - Added a way to optomize quad function commands
+20241014 - Added a way to optimize quad function commands
 20241017 - Horizontal priority optimization added.
+20241023 - Changed logic back to logic that was working previously.
 */
 
 #include <windows.h>
@@ -231,76 +232,6 @@ int quad2(struct Quad *q, struct LinkedList *parentQueue, int *layers, int limit
     return priority;
 }
 
-
-void prioritizeLine(struct LinkedList *queue, struct LinkedList *priorityQueue, int colors) {
-    int i, *colorCounts;
-    struct Node *n = queue->head;
-    
-    colorCounts = malloc(colors * sizeof(int));
-    for(i = 0 ; i < colors ; i++)
-        colorCounts[i] = 0;
-
-    while(n != NULL) {
-        colorCounts[n->marker->colorKey]++;
-        n = n->next;
-    }
-
-    for(i = 0 ; i < colors ; i++) {
-        if(colorCounts[i] > 0) {
-            if(LL_empty(priorityQueue) || colorCounts[i] < colorCounts[priorityQueue->tail->marker->colorKey])
-                LL_append(priorityQueue, allocMarker(0, 0, 0, 0, i));
-            else {
-                struct Node *prev = NULL, *n = priorityQueue->head;
-                while(colorCounts[i] < colorCounts[n->marker->colorKey]) {
-                    prev = n;
-                    n = n->next;
-                }
-                LL_insert(priorityQueue, prev, allocMarker(0, 0, 0, 0, i));
-            }
-        }
-    }
-
-    free(colorCounts);
-}
-
-void mergeRow(struct LinkedList *queue, struct LinkedList *line, struct LinkedList *priority) {
-    while(!LL_empty(priority)) {
-        struct Node *prev = NULL, *n = line->head;
-        int c = priority->head->marker->colorKey;
-        free(LL_removeHead(priority));
-        while(n != NULL) {
-            struct Marker *m1 = n->marker; /* First phase is vetting m1. Finding a node with the color we need. */
-            if(m1->colorKey == c)
-                LL_append(queue, LL_remove(line, prev, &n));
-
-            else {
-                prev = n;
-                n = n->next;
-                continue;
-            }
-            while(n != NULL) {
-                struct Marker *m2 = n->marker; /* Second phase is comparing m2. Finished when m1 needs to be replaced. */
-                if(m1->endCol + 1 == m2->startCol) { /* An unbroken chain of markers means there are no higher priority colors in between. */
-                    m1->endCol = m2->endCol;
-                    if(m1->colorKey == m2->colorKey) { /* If the color matches, bring the node back to the queue after neutering. */
-                        m2->neuter = 1;
-                        LL_append(queue, LL_remove(line, prev, &n));
-                    }
-                    else {
-                        prev = n;
-                        n = n->next;
-                    }
-                }   
-                else /* Need to find a new m1 */
-                    break;
-            }
-        }
-    }
-
-    if(!LL_empty(line))
-        printf("LINE NOT CLEARED!\n");
-}
-
 void mergeCommands(struct LinkedList *lines, struct LinkedList *queue, int size, int colors) {
     struct LinkedList priority = {NULL, NULL};
     int i;
@@ -312,9 +243,19 @@ void mergeCommands(struct LinkedList *lines, struct LinkedList *queue, int size,
     }
 
     for(i = 0 ; i < 128 ; i += size) {
-        if(!LL_empty(&lines[i])) {
-            prioritizeLine(&lines[i], &priority, colors);
-            mergeRow(queue, &lines[i], &priority);
+        while(!LL_empty(&lines[i])) {
+            struct Marker *m1 = lines[i].head->marker;
+            LL_append(queue, LL_removeHead(&lines[i]));
+            while(!LL_empty(&lines[i])) {
+                struct Marker *m2 = lines[i].head->marker;
+                if(m1->endCol + 1 == m2->startCol && m1->colorKey == m2->colorKey) {
+                    m1->endCol = m2->endCol;
+                    m2->neuter = 1;
+                    LL_append(queue, LL_removeHead(&lines[i]));
+                }
+                else
+                    break;
+            }
         }
     }
 
@@ -325,35 +266,22 @@ void mergeCommands(struct LinkedList *lines, struct LinkedList *queue, int size,
     }
 
     for(i = 0 ; i < 128 ; i += size) {
-        if(!LL_empty(&lines[i])) {
-            struct Marker *m1 = LL_removeHead(&lines[i]);
-            while(m1->neuter && !LL_empty(&lines[i])) {
-                free(m1);
-                m1 = LL_removeHead(&lines[i]);
-            }
-            if(m1->neuter) {
-                free(m1);
+        while(!LL_empty(&lines[i])) {
+            struct Marker *m1 = lines[i].head->marker;
+            if(m1->neuter) { //Neutered markers should not create new commands. They are only kept to act as 'bridges'.
+                free(LL_removeHead(&lines[i]));
                 continue;
             }
-            LL_append(queue, m1);
-            while(!m1->neuter && !LL_empty(&lines[i])) {
-                struct Marker *m2 = LL_removeHead(&lines[i]);
-                if(m1->colorKey == m2->colorKey && m1->endRow + 1 == m2->startRow) {
-                    m1->endRow = m2->endRow;
-                    if(m1->endCol == m2->endCol)
-                        free(m2);
-                    else
-                        LL_append(queue, m2);
-                } 
-                else {
-                    m1 = m2;
-                    while(m1->neuter && !LL_empty(&lines[i])) {
-                        free(m1);
-                        m1 = LL_removeHead(&lines[i]);
-                    }
-                    if(!m1->neuter)
-                        LL_append(queue, m1);
+            else
+                LL_append(queue, LL_removeHead(&lines[i]));
+            while(!LL_empty(&lines[i])) {
+                struct Marker *m2 = lines[i].head->marker;
+                if(m1->endRow + 1 == m2->startRow && m1->endCol == m2->endCol && m1->colorKey == m2->colorKey) {
+                    m1->endCol = m2->endCol;
+                    free(LL_removeHead(&lines[i]));
                 }
+                else
+                    break;
             }
         }
     }
