@@ -156,57 +156,22 @@ int quad(struct Quad *q, struct LinkedList *parentQueue, int *layers, int limit,
             priority = priorities[i]; 
 
     /* Note do not add a condition such as layer == layers[q->color]. Doing this will let us avoid picking out colors, but we cannot put colors 'back in'. If a higher layer command falls through, necessary commands will be missing. */
-    if(priority >= layers[q->color]) { /* If the priority is not more signifcant than the layer, we can cover this area with a single command for the color. */
+    if(priority >= layers[q->color] || priority < 0) { /* If the priority is not more signifcant than the layer, we can cover this area with a single command for the color. */
+        LL_append(parentQueue, allocQuadMarker(q));
         while(!LL_empty(&queue)) { /* Picking out extra commands for this layer's color. */
             if(queue.head->marker->colorKey == q->color) /* Toss out all nodes that match this layer's color. */
                 free(LL_removeHead(&queue));
             else
                 LL_append(parentQueue, LL_removeHead(&queue));
         }
-        LL_insert(parentQueue, NULL, allocQuadMarker(q));
     }
-    else
-        while(!LL_empty(&queue))
-            LL_append(parentQueue, LL_removeHead(&queue));
-
-    if(layer == layers[q->color])
-        layers[q->color] = __INT_MAX__;
-
-    return priority;
-}
-
-int quad2(struct Quad *q, struct LinkedList *parentQueue, int *layers, int limit, int layer) {
-    struct LinkedList queue = {NULL, NULL};
-    int i, priority, priorities[4];
-    if(q->size <= limit || q->leaf) {
-        LL_append(parentQueue, allocQuadMarker(q));
-        return layers[q->color];
-    }
-
-    if(layers[q->color] > layer) /* This if statement ensures a layer for a color wont be reset unless it was still at __INT_MAX__ */
-        layers[q->color] = layer;
-
-    for(i = 0 ; i < 4 ; i++)
-        priorities[i] = quad(q->children[i], &queue, layers, limit, layer + 1);
-
-    for(i = 0 ; i < 4 ; i++)
-        if(priorities[i] < priority)
-            priority = priorities[i]; 
-
-    /* Note do not add a condition such as layer == layers[q->color]. Doing this will let us avoid picking out colors, but we cannot put colors 'back in'. If a higher layer command falls through, necessary commands will be missing. */
-    if(priority >= layers[q->color]) { /* If the priority is not more signifcant than the layer, we can cover this area with a single command for the color. */
-        while(!LL_empty(&queue)) { /* Picking out extra commands for this layer's color. */
-            if(queue.head->marker->colorKey == q->color) { /* Toss out all nodes that match this layer's color. */
-                free(LL_removeHead(&queue));
-            }
-            else
-                LL_append(parentQueue, LL_removeHead(&queue));
+    else {
+        if(q->size == 128) {
+            printf("WHAT DA HECK!\n%i %i", layer, priority);
         }
-        LL_insert(parentQueue, NULL, allocQuadMarker(q));
-    }
-    else
         while(!LL_empty(&queue))
             LL_append(parentQueue, LL_removeHead(&queue));
+    }
 
     if(layer == layers[q->color])
         layers[q->color] = __INT_MAX__;
@@ -242,6 +207,7 @@ void mergeCommands(struct LinkedList *lines, struct LinkedList *queue, int size,
     }
 
     /* Merging colors together, in columns. */
+    /*
     while(!LL_empty(queue)) {
         int placement = queue->head->marker->startCol;
         LL_append(&lines[placement], LL_removeHead(queue));
@@ -259,6 +225,32 @@ void mergeCommands(struct LinkedList *lines, struct LinkedList *queue, int size,
             while(!LL_empty(&lines[i])) {
                 struct Marker *m2 = lines[i].head->marker;
                 if(m1->endRow + 1 == m2->startRow && m1->endCol == m2->endCol && m1->colorKey == m2->colorKey) {
+                    m1->endCol = m2->endCol;
+                    free(LL_removeHead(&lines[i]));
+                }
+                else
+                    break;
+            }
+        }
+    }
+    */
+}
+
+void mergeTest(struct LinkedList *lines, struct LinkedList *queue, int size, int colors) {
+    int i;
+
+    while(!LL_empty(queue)) {
+        int placement = queue->head->marker->startRow;
+        LL_append(&lines[placement], LL_removeHead(queue));
+    }
+
+    for(i = 0 ; i < 128 ; i++) {
+        while(!LL_empty(&lines[i])) {
+            struct Marker *m1 = lines[i].head->marker;
+            LL_append(queue, LL_removeHead(&lines[i]));
+            while(!LL_empty(&lines[i])) {
+                struct Marker *m2 = lines[i].head->marker;
+                if(m1->endCol + 1 == m2->startCol && m1->colorKey == m2->colorKey) {
                     m1->endCol = m2->endCol;
                     free(LL_removeHead(&lines[i]));
                 }
@@ -293,7 +285,7 @@ void optimizeCommands(struct LinkedList *queue, int colors) {
     } 
 
     for(i = 0 ; i < 8 ; i++)
-        mergeCommands(lines, &cats[i], sizes[i], colors);
+        mergeTest(lines, &cats[i], sizes[i], colors);
 
     for(i = 0 ; i < 8 ; i++) {
         while(!LL_empty(&cats[i]))
