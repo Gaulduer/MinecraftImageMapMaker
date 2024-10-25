@@ -147,6 +147,7 @@ int quad(struct Quad *q, struct LinkedList *parentQueue, int *layers, int limit,
 
     if(layers[q->color] > layer) /* This if statement ensures a layer for a color wont be reset unless it was still at __INT_MAX__ */
         layers[q->color] = layer;
+    priority = layers[q->color];
 
     for(i = 0 ; i < 4 ; i++)
         priorities[i] = quad(q->children[i], &queue, layers, limit, layer + 1);
@@ -156,7 +157,7 @@ int quad(struct Quad *q, struct LinkedList *parentQueue, int *layers, int limit,
             priority = priorities[i]; 
 
     /* Note do not add a condition such as layer == layers[q->color]. Doing this will let us avoid picking out colors, but we cannot put colors 'back in'. If a higher layer command falls through, necessary commands will be missing. */
-    if(priority >= layers[q->color] || priority < 0) { /* If the priority is not more signifcant than the layer, we can cover this area with a single command for the color. */
+    if(priority >= layers[q->color]) { /* If the priority is not more signifcant than the layer, we can cover this area with a single command for the color. */
         LL_append(parentQueue, allocQuadMarker(q));
         while(!LL_empty(&queue)) { /* Picking out extra commands for this layer's color. */
             if(queue.head->marker->colorKey == q->color) /* Toss out all nodes that match this layer's color. */
@@ -165,13 +166,9 @@ int quad(struct Quad *q, struct LinkedList *parentQueue, int *layers, int limit,
                 LL_append(parentQueue, LL_removeHead(&queue));
         }
     }
-    else {
-        if(q->size == 128) {
-            printf("WHAT DA HECK!\n%i %i", layer, priority);
-        }
+    else 
         while(!LL_empty(&queue))
             LL_append(parentQueue, LL_removeHead(&queue));
-    }
 
     if(layer == layers[q->color])
         layers[q->color] = __INT_MAX__;
