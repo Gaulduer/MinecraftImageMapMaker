@@ -137,43 +137,17 @@ struct Marker* allocQuadMarker(struct Quad *q) {
     return allocMarker(q->col, q->row, q->col + q->size - 1, q->row + q->size - 1, q->color);
 }
 
-int quad(struct Quad *q, struct LinkedList *parentQueue, int *layers, int limit, int layer) {
-    struct LinkedList queue = {NULL, NULL};
-    int i, priority, priorities[4];
+void quad(struct Quad *q, struct LinkedList *queue, int limit) {
+    int i;
     if(q->size <= limit || q->leaf) {
-        LL_append(parentQueue, allocQuadMarker(q));
-        return layers[q->color];
+        LL_append(queue, allocQuadMarker(q));
+        return;
     }
 
-    if(layers[q->color] > layer) /* This if statement ensures a layer for a color wont be reset unless it was still at __INT_MAX__ */
-        layers[q->color] = layer;
-    priority = layers[q->color];
-
     for(i = 0 ; i < 4 ; i++)
-        priorities[i] = quad(q->children[i], &queue, layers, limit, layer + 1);
+        quad(q->children[i], queue, limit);
 
-    for(i = 0 ; i < 4 ; i++)
-        if(priorities[i] < priority)
-            priority = priorities[i]; 
-
-    /* Note do not add a condition such as layer == layers[q->color]. Doing this will let us avoid picking out colors, but we cannot put colors 'back in'. If a higher layer command falls through, necessary commands will be missing. */
-    if(priority >= layers[q->color]) { /* If the priority is not more signifcant than the layer, we can cover this area with a single command for the color. */
-        LL_append(parentQueue, allocQuadMarker(q));
-        while(!LL_empty(&queue)) { /* Picking out extra commands for this layer's color. */
-            if(queue.head->marker->colorKey == q->color) /* Toss out all nodes that match this layer's color. */
-                free(LL_removeHead(&queue));
-            else
-                LL_append(parentQueue, LL_removeHead(&queue));
-        }
-    }
-    else 
-        while(!LL_empty(&queue))
-            LL_append(parentQueue, LL_removeHead(&queue));
-
-    if(layer == layers[q->color])
-        layers[q->color] = __INT_MAX__;
-
-    return priority;
+    return;
 }
 
 void mergeCommands(struct LinkedList *lines, struct LinkedList *queue, int size, int colors) {
@@ -233,7 +207,7 @@ void mergeCommands(struct LinkedList *lines, struct LinkedList *queue, int size,
     */
 }
 
-void mergeTest(struct LinkedList *lines, struct LinkedList *queue, int size, int colors) {
+void mergeTest(struct LinkedList *lines, struct LinkedList *queue) {
     int i;
 
     while(!LL_empty(queue)) {
@@ -259,58 +233,32 @@ void mergeTest(struct LinkedList *lines, struct LinkedList *queue, int size, int
 }
 
 void optimizeCommands(struct LinkedList *queue, int colors) {
-    int i, size = 128, sizes[8];
-    struct LinkedList priorityQueue = {NULL, NULL}, cats[8], lines[128]; /* These linked lists seperate commands based on their size category. */
-    for(i = 0 ; i < 8 ; i++) {
-        sizes[i] = size;
-        size /= 2;
-        cats[i].head = NULL;
-        cats[i].tail = NULL;
-    }
+    int i;
+    struct LinkedList priorityQueue = {NULL, NULL}, lines[128]; 
+
     for(i = 0 ; i < 128 ; i++) {
         lines[i].head = NULL;
         lines[i].tail = NULL;
     }
 
-    while(!LL_empty(queue)) {
-        struct Marker *m = queue->head->marker;
-        int width = (m->endCol - m->startCol + 1);
-        for(i = 0 ; i < 8 ; i++) {
-            if(sizes[i] == width)
-                LL_append(&cats[i], LL_removeHead(queue));
-        }
-    } 
-
-    for(i = 0 ; i < 8 ; i++)
-        mergeTest(lines, &cats[i], sizes[i], colors);
-
-    for(i = 0 ; i < 8 ; i++) {
-        while(!LL_empty(&cats[i]))
-            LL_append(queue, LL_removeHead(&cats[i]));
-    }
+    mergeTest(lines, queue);
 }
 
 void generateCommands(struct Quad q, char **colors) {
     FILE *commands = fopen("commands.txt", "w");
     struct LinkedList commandQueue = {NULL, NULL};
-    int i, n = 0, *layers;
+    int i, n = 0;
 
     while(colors[i++] != NULL);
     n = i - 1;
 
-    layers = malloc(n * sizeof(int));
-
-    for(i = 0 ; i < n ; i++)
-        layers[i] = __INT_MAX__;
-
-    quad(&q, &commandQueue, layers, 1, 0);
+    quad(&q, &commandQueue, 2);
     optimizeCommands(&commandQueue, n);
     while(!LL_empty(&commandQueue)) {
         writeCommand(commands, commandQueue.head->marker, colors);
         free(LL_removeHead(&commandQueue));
     }
     fclose(commands);
-    free(layers);
 }
 
 int amountOfColors(FILE *colorKey) {
