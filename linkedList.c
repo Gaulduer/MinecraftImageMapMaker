@@ -16,6 +16,8 @@ struct Marker* allocMarker(int startCol, int startRow, int endCol, int endRow, i
     m->startRow = startRow;
     m->endCol = endCol;
     m->endRow = endRow;
+    m->low = startCol;
+    m->high = endCol;
     m->colorKey = colorKey;
     m->neuter = 0;
     return m;

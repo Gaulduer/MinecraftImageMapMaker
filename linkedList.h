@@ -15,8 +15,10 @@ struct Marker {
     int startRow;
     int endCol;
     int endRow;
+    int low; /* Lower limit for the startCol. */
+    int high; /* Upper limit for the endCol. */
     int colorKey; /* A number used as a key to identify the color of the node. */
-    int neuter; /* Used to determine if the marker should create a new command or be ignored. */
+    int neuter; /* Determines if a marker should be used to create more commands. */
 };
 
 struct Node { /* The node helps keep track of important information to write commands. */
