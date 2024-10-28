@@ -83,3 +83,13 @@ struct Marker* LL_remove(struct LinkedList *ll, struct Node *prev, struct Node *
     free(remove);
     return m;
 }
+
+void LL_print(struct LinkedList *ll) {
+    struct Node *n = ll->head;
+    printf("[ ");
+    while(n != NULL) {
+        printf("%i ", n->marker->colorKey);
+        n = n->next;
+    }
+    printf("]\n");
+}
