@@ -39,3 +39,4 @@ void LL_insert(struct LinkedList *ll, struct Node *prev, struct Marker *m);
 struct Marker* LL_removeHead(struct LinkedList *ll);
 struct Marker* LL_remove(struct LinkedList *ll, struct Node *prev, struct Node **remove);
 void LL_print(struct LinkedList *ll);
+void LL_printMarker(struct Marker *m);

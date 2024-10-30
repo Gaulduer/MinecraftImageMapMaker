@@ -93,3 +93,7 @@ void LL_print(struct LinkedList *ll) {
     }
     printf("]\n");
 }
+
+void LL_printMarker(struct Marker *m) {
+    printf("START COL:%i END COL:%i START ROW:%i END ROW:%i LOW:%i HIGH:%i NEUTER:%i\n", m->startCol, m->endCol, m->startRow, m->endRow, m->low, m->high, m->neuter);
+}
