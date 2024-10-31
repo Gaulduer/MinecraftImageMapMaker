@@ -32,12 +32,6 @@ void inputCommands() {
     HWND selectedWindow;
     WCHAR name[128];
     char command[512];
-    const size_t len = 512 + 1;
-
-    ip.type = INPUT_KEYBOARD;
-    ip.ki.wScan = 0;
-    ip.ki.time = 0;
-    ip.ki.dwExtraInfo = 0;
 
     GetAsyncKeyState(VK_CONTROL); /* In case control was pressed before. */
     while(!GetAsyncKeyState(VK_CONTROL));
@@ -62,7 +56,7 @@ void inputCommands() {
 
         SendMessageW(selectedWindow, WM_KEYDOWN, 'T', 0);
 
-        Sleep(70);
+        Sleep(60);
 
         SendMessageW(selectedWindow, WM_KEYDOWN, VK_CONTROL, 0);
 
@@ -177,25 +171,28 @@ int quad(struct Quad *q, struct LinkedList *parentQueue, int *layers, int limit,
 }
 
 void mergeCommands(struct LinkedList *lines, struct LinkedList *queue, int size, int colors) {
-    struct LinkedList priority = {NULL, NULL};
     int i;
 
-    /* Merging colors together, in rows. */
+    /* Merging commands horizontally. */
     while(!LL_empty(queue)) {
         int placement = queue->head->marker->startRow;
         LL_append(&lines[placement], LL_removeHead(queue));
     }
 
-    for(i = 0 ; i < 128 ; i += size) {
+    for(i = 0 ; i < 128 ; i++) {
         while(!LL_empty(&lines[i])) {
             struct Marker *m1 = lines[i].head->marker;
             LL_append(queue, LL_removeHead(&lines[i]));
+            if(m1->endCol - m1->startCol + 1 != size)
+                continue;
             while(!LL_empty(&lines[i])) {
                 struct Marker *m2 = lines[i].head->marker;
-                if(m1->endCol + 1 == m2->startCol && m1->colorKey == m2->colorKey) {
-                    m1->endCol = m2->endCol;
-                    m2->neuter = 1;
-                    LL_append(queue, LL_removeHead(&lines[i]));
+                if(m1->endRow + 1 == m2->startRow && m1->colorKey == m2->colorKey) {
+                    m1->endRow = m2->endRow;
+                    if(m1->endCol == m2->endCol)
+                        free(LL_removeHead(&lines[i]));
+                    else
+                        LL_append(queue, LL_removeHead(&lines[i]));
                 }
                 else
                     break;
@@ -203,41 +200,9 @@ void mergeCommands(struct LinkedList *lines, struct LinkedList *queue, int size,
         }
     }
 
-    /* Merging colors together, in columns. */
-    /*
+    /* Merging commands vertically. */
     while(!LL_empty(queue)) {
         int placement = queue->head->marker->startCol;
-        LL_append(&lines[placement], LL_removeHead(queue));
-    }
-
-    for(i = 0 ; i < 128 ; i += size) {
-        while(!LL_empty(&lines[i])) {
-            struct Marker *m1 = lines[i].head->marker;
-            if(m1->neuter) { //Neutered markers should not create new commands. They are only kept to act as 'bridges'.
-                free(LL_removeHead(&lines[i]));
-                continue;
-            }
-            else
-                LL_append(queue, LL_removeHead(&lines[i]));
-            while(!LL_empty(&lines[i])) {
-                struct Marker *m2 = lines[i].head->marker;
-                if(m1->endRow + 1 == m2->startRow && m1->endCol == m2->endCol && m1->colorKey == m2->colorKey) {
-                    m1->endCol = m2->endCol;
-                    free(LL_removeHead(&lines[i]));
-                }
-                else
-                    break;
-            }
-        }
-    }
-    */
-}
-
-void mergeTest(struct LinkedList *lines, struct LinkedList *queue, int size, int colors) {
-    int i;
-
-    while(!LL_empty(queue)) {
-        int placement = queue->head->marker->startRow;
         LL_append(&lines[placement], LL_removeHead(queue));
     }
 
@@ -282,7 +247,7 @@ void optimizeCommands(struct LinkedList *queue, int colors) {
     } 
 
     for(i = 0 ; i < 8 ; i++)
-        mergeTest(lines, &cats[i], sizes[i], colors);
+        mergeCommands(lines, &cats[i], sizes[i], colors);
 
     for(i = 0 ; i < 8 ; i++) {
         while(!LL_empty(&cats[i]))
@@ -303,7 +268,7 @@ void generateCommands(struct Quad q, char **colors) {
     for(i = 0 ; i < n ; i++)
         layers[i] = __INT_MAX__;
 
-    quad(&q, &commandQueue, layers, 1, 0);
+    quad(&q, &commandQueue, layers, 4, 0);
     optimizeCommands(&commandQueue, n);
     while(!LL_empty(&commandQueue)) {
         writeCommand(commands, commandQueue.head->marker, colors);
