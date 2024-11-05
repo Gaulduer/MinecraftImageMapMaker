@@ -15,6 +15,8 @@ struct Marker {
     int startRow;
     int endCol;
     int endRow;
+    int low;
+    int high;
     int colorKey; /* A number used as a key to identify the color of the node. */
     int neuter; /* Used to determine if the marker should create a new command or be ignored. */
 };
@@ -36,4 +38,5 @@ void LL_append(struct LinkedList *ll, struct Marker *m);
 void LL_insert(struct LinkedList *ll, struct Node *prev, struct Marker *m);
 struct Marker* LL_removeHead(struct LinkedList *ll);
 struct Marker* LL_remove(struct LinkedList *ll, struct Node *prev, struct Node **remove);
-void LL_split(struct LinkedList *ll, struct Node *split, int after);
+void LL_print(struct LinkedList *ll);
+void printMarker(struct Marker *m); 

@@ -16,6 +16,8 @@ struct Marker* allocMarker(int startCol, int startRow, int endCol, int endRow, i
     m->startRow = startRow;
     m->endCol = endCol;
     m->endRow = endRow;
+    m->low = startCol;
+    m->high = endCol;
     m->colorKey = colorKey;
     m->neuter = 0;
     return m;
@@ -80,4 +82,16 @@ struct Marker* LL_remove(struct LinkedList *ll, struct Node *prev, struct Node *
         ll->tail = prev;
     free(remove);
     return m;
+}
+
+void printMarker(struct Marker *m) {
+    printf("START COL: %i, START ROW: %i, END COL: %i, END ROW: %i, LOW: %i, HIGH: %i, KEY: %i\n", m->startCol, m->startRow, m->endCol, m->endRow, m->low, m->high, m->colorKey);
+}
+
+void LL_print(struct LinkedList *ll) {
+    struct Node *n = ll->head;
+    while(n != NULL) {
+        printMarker(n->marker);
+        n = n->next;
+    }
 }
