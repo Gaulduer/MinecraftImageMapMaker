@@ -39,4 +39,7 @@ struct RGBColor {
 
 struct BMPHeader readBMPHeader(FILE*);
 struct RGBColor readRGB(FILE*, int);
+uint32_t readPixel(FILE*, int);
+struct RGBColor pixelToRGB(uint32_t);
+uint32_t rgbToPixel(struct RGBColor);
 void printBMPHeader(struct BMPHeader);

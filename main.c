@@ -15,6 +15,8 @@ Timeline:
 20241017 - Horizontal priority optimization added.
 20241023 - Changed logic back to logic that was working previously.
 20241023 - Improved command input method.
+20241108 - Finished implementing a testing system. This will help provide information on any errors created by command optimization.
+Highlights any errors that will appear in the final resulting image. I intend to make a separate highlight that shows the area of the color that is correct.
 */
 
 #include <windows.h>
@@ -28,12 +30,90 @@ Timeline:
 
 #define LINE_LIMIT 128
 
-void inputCommands() {
-    FILE *commands = fopen("commands.txt", "r");
+uint32_t* allocScaledPixels(uint32_t *pixels, int width, int height, int scale) {
+    uint32_t *scaled = malloc(width * scale * height * scale * sizeof(uint32_t));
+    int i, j, k, ip = 0, is = 0;
+    while(ip < width * height) {
+        for(i = 0 ; i < scale ; i++) {
+            for(j = ip ; j < ip + width ; j++)
+                for(k = 0 ; k < scale ; k++)
+                    scaled[is++] = pixels[j];
+        }
+        ip = j;
+    }
+
+    return scaled;
+}
+
+uint32_t* allocSolidColor(int width, int height, uint32_t color) {
+    uint32_t *pixels = malloc(width * height * sizeof(uint32_t));
+    int i;
+
+    for(i = 0 ; i < width * height ; i++)
+        pixels[i] = color;
+    return pixels;
+};
+
+void fillRectangle(HDC hdc, uint32_t *pixels, int left, int top, int right, int bottom, int scale) {
+    int width = right - left, height = bottom - top;
+    uint32_t *scaledPixels = allocScaledPixels(pixels, width, height, scale);
+    BITMAPINFO bmi;
+    bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
+    bmi.bmiHeader.biWidth = width * scale;
+    bmi.bmiHeader.biHeight = height * scale;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    StretchDIBits(hdc, left * scale, top * scale, width * scale, height * scale, 0, 0, width * scale, height * scale, scaledPixels, &bmi, DIB_RGB_COLORS, SRCCOPY);
+
+    free(scaledPixels);
+}
+
+void outlineRectangle(HDC hdc, int left, int top, int right, int bottom, int scale) {
+    uint32_t *line = allocSolidColor(right - left, 1, 0x00FF00FF);
+    fillRectangle(hdc, line, left, top, right, top + 1, scale);
+    fillRectangle(hdc, line, left, bottom - 1, right, bottom, scale);
+    free(line);
+    line = allocSolidColor(1, bottom - top, 0x00FF00FF);
+    fillRectangle(hdc, line, left, top, left + 1, top, scale);
+    fillRectangle(hdc, line, right - 1, bottom, right, bottom, scale);
+    free(line);
+}
+
+void inputCommand(HWND selectedWindow, char *command) {
+	const size_t len = strlen(command) + 1;
+	HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+    memcpy(GlobalLock(hMem), command, strlen(command) + 1);
+	GlobalUnlock(hMem);
+	OpenClipboard(0);
+	EmptyClipboard();
+	SetClipboardData(CF_TEXT, hMem);
+	CloseClipboard();
+
+    if(GetAsyncKeyState(VK_RIGHT))
+        while(!GetAsyncKeyState(VK_RIGHT));
+    SendMessageW(selectedWindow, WM_KEYDOWN, 'T', 0);
+    Sleep(60);
+    SendMessageW(selectedWindow, WM_KEYDOWN, VK_CONTROL, 0);
+    SendMessageW(selectedWindow, WM_KEYDOWN, 'V', 0);
+    SendMessageW(selectedWindow, WM_KEYDOWN, VK_RETURN, 0);
+}
+
+void simulateCommand(HDC hdc, struct Marker *m, uint32_t color, int xOffset, int yOffset) {
+    uint32_t *pixels = allocSolidColor(m->endCol - m->startCol + 1, m->endRow - m->startRow + 1, color);
+    fillRectangle(hdc, pixels, m->startCol + xOffset, m->startRow + yOffset, m->endCol + 1 + xOffset, m->endRow + 1 + yOffset, 2);
+    free(pixels);
+}
+
+void inputCommands(HDC hdc) {
+    FILE *commands = fopen("commands.txt", "r"), *pixelColors = fopen("pixelColors.txt", "r");
     INPUT ip;
     HWND selectedWindow;
     WCHAR name[128];
     char command[512];
+    struct Marker m;
+    uint32_t color;
 
     GetAsyncKeyState(VK_CONTROL); /* In case control was pressed before. */
     while(!GetAsyncKeyState(VK_CONTROL));
@@ -44,29 +124,13 @@ void inputCommands() {
     Sleep(1000);
 
 	while(fgets(command, 512, commands)) {
-		const size_t len = strlen(command) + 1;
-	    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
-        memcpy(GlobalLock(hMem), command, strlen(command) + 1);
-		GlobalUnlock(hMem);
-		OpenClipboard(0);
-		EmptyClipboard();
-		SetClipboardData(CF_TEXT, hMem);
-		CloseClipboard();
-
-        if(GetAsyncKeyState(VK_RIGHT))
-            while(!GetAsyncKeyState(VK_RIGHT));
-
-        SendMessageW(selectedWindow, WM_KEYDOWN, 'T', 0);
-
-        Sleep(60);
-
-        SendMessageW(selectedWindow, WM_KEYDOWN, VK_CONTROL, 0);
-
-        SendMessageW(selectedWindow, WM_KEYDOWN, 'V', 0);
-
-        SendMessageW(selectedWindow, WM_KEYDOWN, VK_RETURN, 0);
+        fscanf(pixelColors, "%u", &color);
+        sscanf(command, "/fill ~%i ~-1 ~%i ~%i ~-1 ~%i", &m.startCol, &m.startRow, &m.endCol, &m.endRow);
+        inputCommand(selectedWindow, command);
+        simulateCommand(hdc, &m, color, 128, 0);
     }
 
+    fclose(pixelColors);
     fclose(commands);
 }
 
@@ -75,7 +139,7 @@ void imprintGrid(struct LinkedList *queue, int **grid) {
     int i, j;
     struct Node *n = queue->head;
     while(n != NULL) {
-        for(i = n->marker->startRow ; i <= n->marker->endCol ; i++) {
+        for(i = n->marker->startRow ; i <= n->marker->endRow ; i++) {
             for(j = n->marker->startCol ; j <= n->marker->endCol ; j++) {
                 grid[i][j] = n->marker->colorKey;
             }
@@ -116,9 +180,9 @@ int getDiff(struct RGBColor c1, struct RGBColor c2) {
     return (c1.r > c2.r ? (c1.r - c2.r):(c2.r - c1.r)) + (c1.g > c2.g ? (c1.g - c2.g):(c2.g - c1.g)) + (c1.b > c2.b ? (c1.b - c2.b):(c2.b - c1.b));
 }
 
-struct RGBColor selectRGB(struct RGBColor compare, int *index, FILE *colorKey) {
+int selectColorIndex(struct RGBColor compare, FILE *colorKey) {
     char block[128], blockBuffer[128];
-    int line = 0, diff, diffBuffer, r, g, b;
+    int line = 0, index, diff, diffBuffer, r, g, b;
     struct RGBColor rgb, rgbBuffer;
 
     rewind(colorKey);
@@ -134,28 +198,25 @@ struct RGBColor selectRGB(struct RGBColor compare, int *index, FILE *colorKey) {
             rgb = rgbBuffer;
             strcpy(block, blockBuffer);
             diff = diffBuffer;
-            *index = line;
+            index = line;
         }
     }
 
-    return rgb;
+    return index;
 }
 
 COLORREF rgbFromIndex(int index, FILE *colorKey) {
     int i, r, g, b;
     char buffer[128];
 
+    if(index < 0)
+        return RGB(255, 0, 255);
+
     rewind(colorKey);
     for(i = 0 ; i <= index ; i++)
         fscanf(colorKey, "%i,%i,%i,%s", &r, &g, &b, buffer);
     
     return RGB(r, g, b);
-}
-
-void fillRectangle(HDC hdc, COLORREF color, int left, int top, int right, int bottom) {
-    for(int i = top ; i < bottom ; i++)
-        for(int j = left ; j < right ; j++)
-            SetPixel(hdc, j, i, color);
 }
 
 void writeCommand(FILE *commands, struct Marker *marker, char **colors) {
@@ -414,35 +475,47 @@ void optimizeCommands(struct LinkedList *queue, int colors) {
     for(i = 0 ; i < 8 ; i++)
         mergeCommands(lines, &cats[i], sizes[i], colors);
 
-
-
     for(i = 0 ; i < 8 ; i++) {
         while(!LL_empty(&cats[i]))
             LL_append(queue, LL_removeHead(&cats[i]));
     }
 }
 
-void testCommands(struct LinkedList *queue, HDC hdc) {
-    FILE *key = fopen("colorKeys\\all.csv", "r");
-    struct Node *n = queue->head; 
-    int i, j, scale = 2;
-
-    fillRectangle(hdc, RGB(0, 0, 0), 0, 0, 128 * scale, 128 * scale);
-
+void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, struct LinkedList *q) {
+    int i, j, count = 1;
+    struct Node *n = q->head;
     while(n != NULL) {
-        COLORREF c = rgbFromIndex(n->marker->colorKey, key);
-        printMarker(n->marker);
-        fillRectangle(hdc, c, n->marker->startCol * scale, n->marker->startRow * scale, (n->marker->endCol * scale) + 1, (n->marker->endRow * scale) + 1);
-        n = n->next;
-    }
+        int wrong = 0;
+        struct Marker *m = n->marker;
+        uint32_t *pixels = allocSolidColor(m->endCol - m->startCol + 1, m->endRow - m->startRow + 1, pixelKey[m->colorKey]);
+        for(i = m->startRow ; i <= m->endRow ; i++)
+            for(j = m->startCol ; j <= m->endRow ; j++) {
+                if(original[i][j] != optimized[i][j] && optimized[i][j] == m->colorKey) {
+                    wrong = 1;
+                    printf("MISCOLOR AT [%i, %i]\n", j, i);
+                }
+            }
+        
+        if(wrong) {
+            uint32_t *magenta = allocSolidColor(m->endCol - m->startCol + 1, m->endRow - m->startRow + 1, 0x00FF00FF);
+            
+            printf("INCORRECT LINE: %i", count);
+            fillRectangle(hdc, magenta, m->startCol + 128, m->startRow, m->endCol + 1 + 128, m->endRow + 1, 2); /* Fill the rectangle back in to hide outline. */    
+            free(magenta);
+            getc(stdin); /* Pause for viewing */
+        }
+        fillRectangle(hdc, pixels, m->startCol + 128, m->startRow, m->endCol + 1 + 128, m->endRow + 1, 2); /* Fill the rectangle back in to hide outline. */
+        free(pixels);
 
-    fclose(key);
+        n = n->next;
+        count++; /* Keeps track of which marker we are on. */
+    }
 }
 
-void generateCommands(struct Quad q, char **colors, HDC hdc) {
-    FILE *commands = fopen("commands.txt", "w");
+void generateCommands(struct Quad q, char **colors, uint32_t *pixelKey, HDC hdc) {
+    FILE *commands = fopen("commands.txt", "w"), *pixelColors = fopen("pixelColors.txt", "w");
     struct LinkedList commandQueue = {NULL, NULL};
-    int i, n = 0, *layers, **remove1 = allocGrid(), **remove2 = allocGrid();
+    int i, n = 0, *layers, **originalGrid = allocGrid(), **optimizedGrid = allocGrid();
 
     while(colors[i++] != NULL);
     n = i - 1;
@@ -452,15 +525,21 @@ void generateCommands(struct Quad q, char **colors, HDC hdc) {
     for(i = 0 ; i < n ; i++)
         layers[i] = __INT_MAX__;
 
-    quad(&q, &commandQueue, layers, 1, 0);
-    //optimizeCommands(&commandQueue, n);
-    testCommands(&commandQueue, hdc);
+    quad(&q, &commandQueue, layers, 2, 0);
+    imprintGrid(&commandQueue, originalGrid);
+    optimizeCommands(&commandQueue, n);
+    imprintGrid(&commandQueue, optimizedGrid);
+    testCommands(hdc, pixelKey, originalGrid, optimizedGrid, &commandQueue);
 
     while(!LL_empty(&commandQueue)) {
+        fprintf(pixelColors, "%u\n", pixelKey[commandQueue.head->marker->colorKey]);
         writeCommand(commands, commandQueue.head->marker, colors);
         free(LL_removeHead(&commandQueue));
     }
     fclose(commands);
+    fclose(pixelColors);
+    freeGrid(originalGrid);
+    freeGrid(optimizedGrid);
     free(layers);
 }
 
@@ -488,37 +567,55 @@ char** getColorNames(FILE *colorKey, int n) {
     return colors;
 }
 
+uint32_t* getPixelKey(FILE *colorKey, int n) {
+    int i = 0;
+    char buffer[64];
+    struct RGBColor rgb;
+    uint32_t *pixels = malloc(n * sizeof(uint32_t));
+    
+    rewind(colorKey);
+    for(i = 0 ; i < n ; i++) {
+        fscanf(colorKey, "%i,%i,%i,%s", &rgb.r, &rgb.g, &rgb.b, buffer);
+        pixels[i] = rgbToPixel(rgb);
+    }
+
+    return pixels;
+}
+
 void readImage(HDC hdc, int scale, char *image, char *key) {
     FILE *fr = fopen(image, "rb");
     FILE *colorKey = fopen(key, "r");
     FILE *colorIndices = fopen("colorIndices.txt", "w");
-    struct BMPHeader h = readBMPHeader(fr);
-    struct RGBColor rgb, minecraftRGB;
-    struct Quad q;
     int **grid = allocGrid();
-    int transparency = 0, i, j, n = amountOfColors(colorKey);
+    int transparency = 0, i, j, p = 0, n = amountOfColors(colorKey);
+    struct BMPHeader h = readBMPHeader(fr);
+    struct RGBColor rgb, minecraftRGB, *minecraftRGBs;
+    struct Quad q;
     char **colors = getColorNames(colorKey, n);
+    uint32_t *pixels = malloc(128 * 128 * sizeof(uint32_t)), *pixelKey = getPixelKey(colorKey, n), pixel = 0;
 
     if(h.bitsPerPixel > 24)
         transparency = 1;
 
-    for(i = 127 ; i > - 1 ; i--) {
-        for(j = 0 ; j < 128 ; j++) {
-            rgb = readRGB(fr, transparency);
-            minecraftRGB = selectRGB(rgb, &grid[i][j], colorKey);
-            fillRectangle(hdc, RGB(rgb.r, rgb.g, rgb.b), j*scale, (i - 1) * scale, (j + 1) * scale, i*scale);
-            fillRectangle(hdc, RGB(minecraftRGB.r, minecraftRGB.g, minecraftRGB.b), (j + 128) * scale, (i - 1) * scale, (j + 1 + 128) * scale, i*scale);
-            fprintf(colorIndices, "%i\n", grid[i][j]);
-        }
+    for(i = 0 ; i < 128 * 128 ; i++) 
+        pixels[i] = readPixel(fr, transparency);
+
+    fillRectangle(hdc, pixels, 0, 0, 128, 128, 2);
+
+    for(i = 0 ; i < 128 ; i++) {
+        for(j = 0 ; j < 128 ; j++)
+            grid[i][j] = selectColorIndex(pixelToRGB(pixels[(127 - i) * 128 + j]), colorKey);
     }
 
     q = buildQuadOG(grid, 128);
-    generateCommands(q, colors, hdc);
+    generateCommands(q, colors, pixelKey, hdc);
     destroyQuad(&q);
     freeGrid(grid);
     for(i = 0 ; colors[i] != NULL ; i++)
         free(colors[i]);
     free(colors);
+    free(pixels);
+    free(pixelKey);
     fclose(fr);
     fclose(colorKey);
     fclose(colorIndices);
@@ -532,7 +629,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             switch(wp) {
                 case 0: {
                     printf("Inputing commands...\n");
-                    inputCommands();
+                    inputCommands(GetDC(hwnd));
                 } break;
                 default:
                     printf("No command associated with WP %i", wp);
@@ -544,8 +641,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return 0;
 }
 
-void mergeTest() {
-    int i, inc = 1, n = 59, *counters = malloc(n * sizeof(int));
+void mergeTest(HDC hdc, char *key) {
+    FILE *colorKey = fopen(key, "r");
+    int i, j, inc = 1, n = 59, *counters = malloc(n * sizeof(int)), **grid = allocGrid();
     struct LinkedList priorityQueue = {NULL, NULL}, commandQueue = {NULL, NULL}, *q = &commandQueue, lines[LINE_LIMIT];
     struct Node *priority;
 
@@ -557,26 +655,13 @@ void mergeTest() {
     for(i = 0 ; i < n ; i++)
         counters[i] = 0;
 
-    for(i = 0 ; i < 10 ; i++)
-        LL_append(q, allocMarker(i, 0, i, 0, 26));
-    for(i = 10 ; i < 118 ; i++)
-        LL_append(q, allocMarker(i, 0, i, 0, 26));
-    for(i = 118 ; i < 128 ; i++)
-        LL_append(q, allocMarker(i, 0, i, 0, 26));  
+    for(i = 0 ; i < 128 ; i++)
+        for(j = 0 ; j < 128 ; j++)
+            LL_append(q, allocMarker(j, i, j, i, 8));
 
-    for(i = 0 ; i < 10 ; i++)
-        LL_append(q, allocMarker(i, 1, i, 1, 24));
-    for(i = 10 ; i < 118 ; i++)
-        LL_append(q, allocMarker(i, 1, i, 1, 24));
-    for(i = 118 ; i < 128 ; i++)
-        LL_append(q, allocMarker(i, 1, i, 1, 24));
+    LL_print(q);
 
-    for(i = 0 ; i < 10 ; i++)
-        LL_append(q, allocMarker(i, 2, i, 2, 25));
-    for(i = 10 ; i < 118 ; i++)
-        LL_append(q, allocMarker(i, 2, i, 2, 25));
-    for(i = 118 ; i < 128 ; i++)
-        LL_append(q, allocMarker(i, 2, i, 2, 25));
+    imprintGrid(q, grid);
 
     while(!LL_empty(q)) {
         struct Marker *m = q->head->marker;
@@ -638,10 +723,22 @@ void mergeTest() {
     printf("RESULTS:\n");
     LL_print(q);
 
+    //testCommands(q, hdc, grid);
+
     while(!LL_empty(q))
         free(LL_removeHead(q));
 
+    freeGrid(grid);
     free(counters);
+}
+
+void stringTest() {
+    char *command = "/fill ~0 ~-1 ~0 ~125 ~-1 ~127 minecraft:gray_terracotta";
+    struct Marker m;
+
+    sscanf(command, "/fill ~%i ~-1 ~%i ~%i ~-1 ~%i", &m.startCol, &m.startRow, &m.endCol, &m.endRow);
+
+    printf("%i %i %i %i\n", m.startCol, m.startRow, m.endCol, m.endRow);
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int cmdShow) {
@@ -656,7 +753,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
     CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 256, 528, 100, hwnd, 0, NULL, NULL);
 
     readImage(GetDC(hwnd), 2, "gurt.bmp", "colorKeys\\all.csv");
-    //mergeTest();
+    //mergeTest(GetDC(hwnd), "colorKeys\\all.csv");
+    //rgbTest(GetDC(hwnd), "colorKeys\\all.csv");
+    //stringTest();
 
     MSG msg = {};
     msg.hwnd = hwnd;

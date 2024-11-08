@@ -47,6 +47,37 @@ struct RGBColor readRGB(FILE *fr, int transparency) {
     return rgb;
 }
 
+uint32_t readPixel(FILE *fr, int transparency) {
+    uint8_t toss;
+    uint32_t pixel = 0;
+
+    fread(&pixel, 3 * sizeof(uint8_t), 1, fr);
+    if(transparency)
+        fread(&toss, sizeof(uint8_t), 1, fr);
+
+    return pixel;
+}
+
+struct RGBColor pixelToRGB(uint32_t pixel) {
+    struct RGBColor rgb;
+    rgb.r = (uint8_t)(pixel >> 16);
+    rgb.g = (uint8_t)(pixel >> 8);
+    rgb.b = (uint8_t)pixel;
+    return rgb;
+}
+
+uint32_t rgbToPixel(struct RGBColor rgb) {
+    uint32_t pixel = 0;
+
+    pixel += (uint32_t)(rgb.r);
+    pixel = pixel << 8;
+    pixel += (uint32_t)(rgb.g);
+    pixel = pixel << 8;
+    pixel += (uint32_t)(rgb.b);
+
+    return pixel;
+}
+
 void printBMPHeader(struct BMPHeader h) {
     printf("Type: %i\n", h.type);
     printf("Size: %i\n", h.size);
