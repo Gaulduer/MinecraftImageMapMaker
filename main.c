@@ -103,7 +103,7 @@ void inputCommands(HDC hdc) {
     HWND selectedWindow;
     WCHAR name[128];
     char command[512];
-    struct Marker m;
+    struct Marker m = {0, 127, 0, 127, 0, 127, 0, 0};
     uint32_t color;
 
     GetAsyncKeyState(VK_CONTROL); /* In case control was pressed before. */
@@ -112,6 +112,11 @@ void inputCommands(HDC hdc) {
     GetWindowTextW(selectedWindow, name, 128);
     printf("Selected Window - %ls\n", name);
 
+    {
+        uint32_t *pixels = allocSolidColor(128, 128, 0x0FF00FF);
+        fillRectangle(hdc, pixels, 128, 0, 256, 128, 2);
+        free(pixels);
+    }
     Sleep(1000);
 
 	while(fgets(command, 512, commands)) {
@@ -121,6 +126,7 @@ void inputCommands(HDC hdc) {
         simulateCommand(hdc, &m, color, 128, 0);
     }
 
+    printf("Commands completed!\n");
     fclose(pixelColors);
     fclose(commands);
 }
@@ -327,7 +333,7 @@ void extractColor(struct LinkedList (*lines)[128], int c) { /* Merges markers of
 }
 
 int mergeMarker(struct Marker *m1, struct Marker *m2) {
-    if(m1->startCol < m2->low || m1->endCol > m2->high) /* m1 cannot fit into m2. */
+    if(m1->startCol < m2->low || m1->endCol > m2->high || m2->startCol < m1->low || m2->endCol > m1->high) /* The markers cannot fit into eachother. */
         return 0;
 
     m2->startRow = m1->startRow; /* The startRow will always be taken from m1. */
@@ -344,32 +350,31 @@ int mergeMarker(struct Marker *m1, struct Marker *m2) {
 void mergeColor(struct LinkedList *q, struct LinkedList *lines /* This is just the 'single color' set of lines. */) {
     int i;
 
-    for(i = 0 ; i < 127 ; i ++) {
-        struct Node *prev1 = NULL, *n1 = lines[i].head, *prev2 = NULL, *n2 = lines[i + 1].head;
+    for(i = 0 ; i < 127 ; i++) {
+        struct Node *prev = NULL, *n1 = lines[i].head, *n2 = lines[i + 1].head;
         while(n1 != NULL && n2 != NULL) {
             if(n1->marker->neuter) {
-                free(LL_remove(&lines[i], prev1, &n1));
+                prev = n1;
+                n1 = n1->next;
                 continue;
             }
-            
-            while(n2 != NULL && n2->marker->high < n1->marker->low) {
-                prev2 = n2;
+
+            while(n2 != NULL && n2->marker->high < n1->marker->startCol)
                 n2 = n2->next;
-            }
 
             if(n2 == NULL)
                 break;
 
-            if(mergeMarker(n1->marker, n2->marker)) /* The merge of the markers was successful. */
-                free(LL_remove(&lines[i], prev1, &n1));
-            else { /* The merge failed, leave behind the marker. */
-                prev1 = n1;
+            if(mergeMarker(n1->marker, n2->marker))
+                free(LL_remove(&lines[i], prev, &n1));
+            else {
+                prev = n1;
                 n1 = n1->next;
             }
         }
     }
 
-    for(i = 0 ; i < 128 ; i ++) {
+    for(i = 0 ; i < 128 ; i++) {
         while(!LL_empty(&lines[i]))
             if(lines[i].head->marker->neuter)
                 free(LL_removeHead(&lines[i]));
@@ -398,14 +403,7 @@ void mergeCommands(struct LinkedList (*lines)[128], struct LinkedList *q, int co
         int c = priorityQueue.head->marker->colorKey;
         free(LL_removeHead(&priorityQueue));
         extractColor(lines, c);
-        //mergeColor(q, lines[1]);
-        for(i = 0 ; i < 128 ; i++) {
-            while(!LL_empty(&lines[1][i]))
-                if(lines[1][i].head->marker->neuter)
-                    free(LL_removeHead(&lines[1][i]));
-                else
-                    LL_append(q, LL_removeHead(&lines[1][i]));
-        }
+        mergeColor(q, lines[1]);
     }
 }
 
@@ -604,10 +602,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
     HWND hwnd = CreateWindowW(wc.lpszClassName, wc.lpszMenuName, WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 528, 394, NULL, NULL, NULL, NULL);
     CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 256, 528, 100, hwnd, 0, NULL, NULL);
 
-    readImage(GetDC(hwnd), 2, "gurt.bmp", "colorKeys\\all.csv");
-    //mergeTest(GetDC(hwnd), "colorKeys\\all.csv");
-    //rgbTest(GetDC(hwnd), "colorKeys\\all.csv");
-    //stringTest();
+    readImage(GetDC(hwnd), 2, "billCipher.bmp", "colorKeys\\all.csv");
 
     MSG msg = {};
     msg.hwnd = hwnd;
