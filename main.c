@@ -260,38 +260,6 @@ void prioritizeMarkers(struct LinkedList *pq, int *counters, int n) {
     }
 }
 
-void mergeRow(struct LinkedList **lines, int c) { /* Merges markers of color c in a single row together horizontally. */
-    int i;
-    for(i = 0 ; i < 128 ; i++) {
-        int low = 0;
-        struct Node *prev = NULL, *n = lines[0][i].head;
-        while(n != NULL) {
-            struct Marker *m1 = n->marker;
-            prev = n;
-            n = n->next;
-            if(m1->colorKey != c)
-                continue;
-            m1->low = low;
-            while(n != NULL) {
-                struct Marker *m2 = n->marker;
-                if(m1->high + 1 == m2->startCol && !m2->neuter) {
-                    m1->high = m2->endCol;
-                    if(m2->colorKey == c) {
-                        m1->endCol = m2->endCol;
-                        free(LL_remove(&lines[0][i], prev, &n));
-                    }
-                    else {
-                        prev = n;
-                        n = n->next;
-                    }
-                }
-                else
-                    break;
-            }
-        }
-    }
-}
-
 void extractColor(struct LinkedList (*lines)[128], int c) { /* Merges markers of color c in a single row together horizontally. */
     int i;
     for(i = 0 ; i < 128 ; i++) {
