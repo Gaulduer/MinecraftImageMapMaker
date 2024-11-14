@@ -17,6 +17,8 @@ Timeline:
 20241023 - Improved command input method.
 20241108 - Finished implementing a testing system. This will help provide information on any errors created by command optimization.
 Highlights any errors that will appear in the final resulting image. I intend to make a separate highlight that shows the area of the color that is correct.
+20241109 - The pixels shown for errors now get highlighted cyan if they are correct, magenta if they are wrong.
+20241113 - There is are new commands to merge markers. They do not work, oops!
 */
 
 #include <windows.h>
@@ -68,17 +70,6 @@ void fillRectangle(HDC hdc, uint32_t *pixels, int left, int top, int right, int 
     StretchDIBits(hdc, left * scale, top * scale, width * scale, height * scale, 0, 0, width * scale, height * scale, scaledPixels, &bmi, DIB_RGB_COLORS, SRCCOPY);
 
     free(scaledPixels);
-}
-
-void outlineRectangle(HDC hdc, int left, int top, int right, int bottom, int scale) {
-    uint32_t *line = allocSolidColor(right - left, 1, 0x00FF00FF);
-    fillRectangle(hdc, line, left, top, right, top + 1, scale);
-    fillRectangle(hdc, line, left, bottom - 1, right, bottom, scale);
-    free(line);
-    line = allocSolidColor(1, bottom - top, 0x00FF00FF);
-    fillRectangle(hdc, line, left, top, left + 1, top, scale);
-    fillRectangle(hdc, line, right - 1, bottom, right, bottom, scale);
-    free(line);
 }
 
 void inputCommand(HWND selectedWindow, char *command) {
@@ -138,6 +129,13 @@ void inputCommands(HDC hdc) {
 void imprintGrid(struct LinkedList *queue, int **grid) {
     int i, j;
     struct Node *n = queue->head;
+
+    /* Since not all the indices may be filled, filling them with a default. */
+    for(i = 0 ; i < 128 ; i++) {
+        for(j = 0 ; j < 128 ; j++)
+            grid[i][j] = -1; /* Setting to negative 1 since that is an impossible index. */
+    }
+    
     while(n != NULL) {
         for(i = n->marker->startRow ; i <= n->marker->endRow ; i++) {
             for(j = n->marker->startCol ; j <= n->marker->endCol ; j++) {
@@ -266,136 +264,168 @@ int quad(struct Quad *q, struct LinkedList *parentQueue, int *layers, int limit,
     return priority;
 }
 
-void prioritizeMarkers(struct LinkedList *priorityQueue, int *counters, int n) {
+void prioritizeMarkers(struct LinkedList *pq, int *counters, int n) {
     int i;
     for(i = 0 ; i < n ; i++) {
         if(counters[i] == 0)
             continue;
-        if(LL_empty(priorityQueue) || counters[priorityQueue->tail->marker->colorKey] >= counters[i])
-            LL_append(priorityQueue, allocMarker(0, 0, 0, 0, i));
+        if(LL_empty(pq) || counters[pq->tail->marker->colorKey] >= counters[i])
+            LL_append(pq, allocMarker(0, 0, 0, 0, i));
         else {
-            struct Node *prev = NULL, *n = priorityQueue->head;
+            struct Node *prev = NULL, *n = pq->head;
             while(counters[n->marker->colorKey] >= counters[i]) {
                 prev = n;
                 n = n->next;
             }
-            LL_insert(priorityQueue, prev, allocMarker(0, 0, 0, 0, i));
+            LL_insert(pq, prev, allocMarker(0, 0, 0, 0, i));
         }
     }
 }
 
-void mergeRow(struct LinkedList *row, int c) { /* Merges markers of color c in a single row together horizontally. */
-    int low = 0;
-    struct Node *prev = NULL, *n = row->head;
-    while(n != NULL) {
-        struct Marker *m1 = n->marker;
-        prev = n;
-        n = n->next;
-        if(m1->colorKey != c)
-            continue;
-        m1->low = low;
-        m1->neuter = 1; /* Ensures other markers will be stopped when they encounter this one. */
+void mergeRow(struct LinkedList **lines, int c) { /* Merges markers of color c in a single row together horizontally. */
+    int i;
+    for(i = 0 ; i < 128 ; i++) {
+        int low = 0;
+        struct Node *prev = NULL, *n = lines[0][i].head;
         while(n != NULL) {
-            struct Marker *m2 = n->marker;
-            if(m1->high + 1 == m2->startCol && !m2->neuter) {
-                m1->high = m2->endCol;
-                if(m2->colorKey == c) {
-                    m1->endCol = m2->endCol;
-                    free(LL_remove(row, prev, &n));
+            struct Marker *m1 = n->marker;
+            prev = n;
+            n = n->next;
+            if(m1->colorKey != c)
+                continue;
+            m1->low = low;
+            while(n != NULL) {
+                struct Marker *m2 = n->marker;
+                if(m1->high + 1 == m2->startCol && !m2->neuter) {
+                    m1->high = m2->endCol;
+                    if(m2->colorKey == c) {
+                        m1->endCol = m2->endCol;
+                        free(LL_remove(&lines[0][i], prev, &n));
+                    }
+                    else {
+                        prev = n;
+                        n = n->next;
+                    }
                 }
-                else {
-                    prev = n;
-                    n = n->next;
-                }
+                else
+                    break;
             }
-            else
-                break;
         }
     }
 }
 
-void mergeTwoRows(struct LinkedList *row1, struct LinkedList *row2, struct LinkedList *q, int c) { /* 'Zippering' markers of the same color together between two rows. A vertical merge. */
-    struct Node *prev1 = NULL, *n1 = row1->head, *prev2 = NULL, *n2 = row2->head, *prevContact = NULL, *contact = row2->head;
-    
-    while(n1 != NULL && n2 != NULL) {
-        prev2 = prevContact;
-        n2 = contact;
-
-        if(n1->marker->colorKey != c) {
-            prev1 = n1;
-            n1 = n1->next;
-            continue;
-        }
-
-        while(n2 != NULL && n2->marker->endCol < n1->marker->low) {
-            prev2 = n2;
-            n2 = n2->next;
-        }
-
-        if(n2 == NULL)
-            break;
-
-        prevContact = prev2;
-        contact = n2;
-
-        while(n2->marker->endCol < n1->marker->startCol && n2->next != NULL) {
-            if(n2->marker->endCol + 1 == n2->next->marker->startCol) {
-                n1->marker->low = n1->marker->low > n2->next->marker->startCol ? n1->marker->low:n2->next->marker->startCol;
-                prevContact = prev2;
-                contact = n2;
+void extractColor(struct LinkedList (*lines)[128], int c) { /* Merges markers of color c in a single row together horizontally. */
+    int i;
+    for(i = 0 ; i < 128 ; i++) {
+        int low = 0;
+        struct Node *prev = NULL, *n = lines[0][i].head;
+        while(n != NULL) {
+            struct Marker *m1 = cloneMarker(n->marker); /* Starting by copy a valid marker. Any existing marker is of equal or lower priority */
+            LL_append(&lines[1][i], m1); /* Adding the marker to the separate line set exclusive to the color 'c' */
+            if(n->marker->colorKey == c) /* Taking the place of the marker with the same color. */
+                free(LL_remove(&lines[0][i], prev, &n));
+            else { /* Setting the marker up to be a filler marker in case no 'real' marker is found. */
+                m1->colorKey = c; /* Setting the filler markers color key to the current color being extracted. */
+                m1->neuter = 1; /* This is set in case no instance of the color is encountered on this row. */
+                prev = n;
+                n = n->next;
             }
-            prev2 = n2;
-            n2 = n2->next;
-        }
-
-        if(contact->marker->startCol > n1->marker->startCol) {
-            prev1 = n1;
-            n1 = n1->next;
-            continue;
-        }
-
-        while(n2->marker->endCol < n1->marker->endCol && n2->next != NULL && n2->marker->endCol + 1 == n2->next->marker->startCol) {
-            prev2 = n2;
-            n2 = n2->next;
-        }
-
-        if(n2->marker->endCol < n1->marker->endCol) {
-            prev1 = n1;
-            n1 = n1->next;
-            continue;
-        }
-
-        while(n2->marker->endCol < n1->marker->high && n2->next != NULL && n2->marker->endCol + 1 == n2->next->marker->startCol) {
-            prev2 = n2;
-            n2 = n2->next;
-        }
-
-        n1->marker->high = n1->marker->high < n2->marker->endCol ? n1->marker->high:n2->marker->endCol;
-        n1->marker->endRow = n2->marker->endRow;
-
-        prev2 = prevContact;
-        n2 = contact;
-
-        while(n2 != NULL && n2->marker->endCol <= n1->marker->high) {
-            if(n2->marker->colorKey == c) {
-                n1->marker->startCol = n1->marker->startCol < n2->marker->startCol ? n1->marker->startCol:n2->marker->startCol;
-                n1->marker->endCol = n1->marker->endCol > n2->marker->endCol ? n1->marker->endCol:n2->marker->endCol;
-                free(LL_remove(row2, prev2, &n2));
+            while(n != NULL) {
+                struct Marker *m2 = n->marker;
+                if(m1->high + 1 == m2->startCol) {
+                    m1->high = m2->endCol;
+                    if(m2->colorKey == c) {
+                        if(m1->neuter) {
+                            m1->neuter = 0; /* Turn the filler marker into a 'real' marker. */
+                            m1->startCol = m2->startCol; /* Setting the 'startCol' (we want to keep 'low') */
+                        }
+                        m1->endCol = m2->endCol;
+                        free(LL_remove(&lines[0][i], prev, &n));
+                    }
+                    else {
+                        prev = n;
+                        n = n->next;
+                    }
+                }
+                else
+                    break;
             }
-            else {
+        }
+    }
+}
+
+int mergeMarker(struct Marker *m1, struct Marker *m2) {
+    int examine = 0;
+    if((m1->startCol == 32 || m2->startCol == 32) && (m1->startRow == 16 || m2->startRow == 16)) {
+        printf("EXAMINE!\n");
+        printMarker(m1);
+        printMarker(m2);
+        printf("%i %i\n", m1->neuter, m2->neuter);
+        examine = 1;
+    }
+
+    if(m1->startCol < m2->low || m1->endCol > m2->high) /* m1 cannot fit into m2. */
+        return 0;
+
+    m2->startRow = m1->startRow; /* The startRow will always be taken from m1. */
+    m2->neuter = m1->neuter; /* This should always be 0 if a merge occurs, but I am doing this just in case. */
+   
+    m2->startCol = m1->startCol < m2->startCol ? m1->startCol:m2->startCol;
+    m2->endCol = m1->endCol > m2->endCol ? m1->endCol:m2->endCol;
+    m2->low = m1->low > m2->low ? m1->low:m2->low;
+    m2->high = m1->high < m2->high ? m1->high:m2->high;
+
+    if(examine) {
+        printf("RESULT!\n");
+        printMarker(m2);
+        getc(stdin);
+    }
+
+    return 1;
+}
+
+void mergeColor(struct LinkedList *q, struct LinkedList *lines /* This is just the 'single color' set of lines. */, int size) {
+    int i;
+
+    for(i = 0 ; i + size < 128 ; i += size) {
+        struct Node *prev1 = NULL, *n1 = lines[i].head, *prev2 = NULL, *n2 = lines[i + size].head;
+        while(n1 != NULL && n2 != NULL) {
+            if(n1->marker->neuter) {
+                free(LL_remove(&lines[i], prev1, &n1));
+                continue;
+            }
+            
+            while(n2 != NULL && n2->marker->high < n1->marker->low) {
                 prev2 = n2;
                 n2 = n2->next;
             }
-        }
 
-        LL_insert(row2, prevContact, LL_remove(row1, prev1, &n1));
+            if(n2 == NULL)
+                break;
+
+            if(mergeMarker(n1->marker, n2->marker)) /* The merge of the markers was successful. */
+                free(LL_remove(&lines[i], prev1, &n1));
+            else { /* The merge failed, leave behind the marker. */
+                prev1 = n1;
+                n1 = n1->next;
+            }
+        }
+    }
+
+    for(i = 0 ; i < 128 ; i += size) {
+        while(!LL_empty(&lines[i]))
+            if(lines[i].head->marker->neuter)
+                free(LL_removeHead(&lines[i]));
+            else
+                LL_append(q, LL_removeHead(&lines[i]));
     }
 }
 
-void mergeCommands(struct LinkedList *lines, struct LinkedList *q, int size, int colors) {
-    int i, inc = 1, *counters = malloc(colors * sizeof(int));
-    struct LinkedList priorityQueue = {NULL, NULL}, commandQueue = {NULL, NULL};
-    struct Node *priority;
+void mergeCommands(struct LinkedList (*lines)[128], struct LinkedList *q, int size, int colors) {
+    int i;
+    int *counters = malloc(colors * sizeof(int));
+    struct Node *n = NULL;
+    struct LinkedList priorityQueue = {NULL, NULL};
 
     for(i = 0 ; i < colors ; i++)
         counters[i] = 0;
@@ -403,55 +433,29 @@ void mergeCommands(struct LinkedList *lines, struct LinkedList *q, int size, int
     while(!LL_empty(q)) {
         struct Marker *m = q->head->marker;
         counters[m->colorKey]++;
-        LL_append(&lines[m->startRow], LL_removeHead(q));
-    }     
+        LL_append(&lines[0][m->startRow], LL_removeHead(q));
+    }
 
     prioritizeMarkers(&priorityQueue, counters, colors);
 
-    priority = priorityQueue.head;
-    while(priority != NULL) {
-        int c = priority->marker->colorKey;
-        priority = priority->next;
-        for(i = 0 ; i < LINE_LIMIT ; i++)
-            mergeRow(&lines[i], c);
+    while(!LL_empty(&priorityQueue)) {
+        int c = priorityQueue.head->marker->colorKey;
+        free(LL_removeHead(&priorityQueue));
+        extractColor(lines, c);
+        mergeColor(q, lines[1], size);
     }
 
-    priority = priorityQueue.head;
-    while(priority != NULL) {
-        struct Node *prev, *n;
-        int c = priority->marker->colorKey, r1 = 0, r2 = 0;
-        priority = priority->next;
-        while(r2 < LINE_LIMIT) {
-            r1 = r2;
-            r2 = r1 + size;
-
-            if(LL_empty(&lines[r1]))
-                continue;
-
-            if(r2 < LINE_LIMIT)
-                mergeTwoRows(&lines[r1], &lines[r2], q, c);
-
-            prev = NULL, n = lines[r1].head;
-            while(n != NULL) {
-                if(n->marker->colorKey == c)
-                    LL_append(q, LL_remove(&lines[r1], prev, &n));
-                else {
-                    prev = n;
-                    n = n->next;
-                }
-            }
+    for(i = 0 ; i < 128 ; i++) {
+        if(!LL_empty(&lines[0][i]) || !LL_empty(&lines[0][i])) {
+            printf("CLEARING ERROR!");
+            getc(stdin);
         }
     }
-
-    while(!LL_empty(&priorityQueue))
-        free(LL_removeHead(&priorityQueue));
-
-    free(counters);
 }
 
 void optimizeCommands(struct LinkedList *queue, int colors) {
     int i, size = 128, sizes[8];
-    struct LinkedList priorityQueue = {NULL, NULL}, cats[8], lines[128]; /* These linked lists seperate commands based on their size category. */
+    struct LinkedList priorityQueue = {NULL, NULL}, cats[8] /* These linked lists seperate commands based on their size category. */, lines[2][128];
     for(i = 0 ; i < 8 ; i++) {
         sizes[i] = size;
         size /= 2;
@@ -459,8 +463,10 @@ void optimizeCommands(struct LinkedList *queue, int colors) {
         cats[i].tail = NULL;
     }
     for(i = 0 ; i < 128 ; i++) {
-        lines[i].head = NULL;
-        lines[i].tail = NULL;
+        lines[0][i].head = NULL;
+        lines[0][i].tail = NULL;
+        lines[1][i].head = NULL;
+        lines[1][i].tail = NULL;
     }
 
     while(!LL_empty(queue)) {
@@ -485,25 +491,27 @@ void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, 
     int i, j, count = 1;
     struct Node *n = q->head;
     while(n != NULL) {
-        int wrong = 0;
+        int wrong = 0, p = 0;
         struct Marker *m = n->marker;
-        uint32_t *pixels = allocSolidColor(m->endCol - m->startCol + 1, m->endRow - m->startRow + 1, pixelKey[m->colorKey]);
-        for(i = m->startRow ; i <= m->endRow ; i++)
-            for(j = m->startCol ; j <= m->endRow ; j++) {
+        uint32_t *pixels = allocSolidColor(m->endCol - m->startCol + 1, m->endRow - m->startRow + 1, 0x0000FFFF);
+        for(i = m->endRow ; i >= m->startRow ; i--)
+            for(j = m->startCol ; j <= m->endCol ; j++) {
                 if(original[i][j] != optimized[i][j] && optimized[i][j] == m->colorKey) {
+                    printf("UH OH AT (%i, %i)\n", j, i);
                     wrong = 1;
-                    printf("MISCOLOR AT [%i, %i]\n", j, i);
+                    pixels[p] = 0x00FF00FF; /* Marking incorrect pixels as magenta. */
                 }
+                p++;
             }
-        
+
         if(wrong) {
-            uint32_t *magenta = allocSolidColor(m->endCol - m->startCol + 1, m->endRow - m->startRow + 1, 0x00FF00FF);
-            
-            printf("INCORRECT LINE: %i", count);
-            fillRectangle(hdc, magenta, m->startCol + 128, m->startRow, m->endCol + 1 + 128, m->endRow + 1, 2); /* Fill the rectangle back in to hide outline. */    
-            free(magenta);
+            fillRectangle(hdc, pixels, m->startCol + 128, m->startRow, m->endCol + 1 + 128, m->endRow + 1, 2); /* Fill the rectangle back in to hide outline. */    
+            printf("ERROR: %i, Start: (%i, %i), Color: %i\n", count, m->startCol, m->startRow, m->colorKey);
             getc(stdin); /* Pause for viewing */
         }
+        free(pixels);
+
+        pixels = allocSolidColor(m->endCol - m->startCol + 1, m->endRow - m->startRow + 1, pixelKey[m->colorKey]);
         fillRectangle(hdc, pixels, m->startCol + 128, m->startRow, m->endCol + 1 + 128, m->endRow + 1, 2); /* Fill the rectangle back in to hide outline. */
         free(pixels);
 
@@ -525,7 +533,7 @@ void generateCommands(struct Quad q, char **colors, uint32_t *pixelKey, HDC hdc)
     for(i = 0 ; i < n ; i++)
         layers[i] = __INT_MAX__;
 
-    quad(&q, &commandQueue, layers, 2, 0);
+    quad(&q, &commandQueue, layers, 1, 0);
     imprintGrid(&commandQueue, originalGrid);
     optimizeCommands(&commandQueue, n);
     imprintGrid(&commandQueue, optimizedGrid);
@@ -639,97 +647,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return DefWindowProcW(hwnd, msg, wp, lp);
     }
     return 0;
-}
-
-void mergeTest(HDC hdc, char *key) {
-    FILE *colorKey = fopen(key, "r");
-    int i, j, inc = 1, n = 59, *counters = malloc(n * sizeof(int)), **grid = allocGrid();
-    struct LinkedList priorityQueue = {NULL, NULL}, commandQueue = {NULL, NULL}, *q = &commandQueue, lines[LINE_LIMIT];
-    struct Node *priority;
-
-    for(i = 0 ; i < LINE_LIMIT ; i++) {
-        lines[i].head = NULL;
-        lines[i].tail = NULL;
-    }
-
-    for(i = 0 ; i < n ; i++)
-        counters[i] = 0;
-
-    for(i = 0 ; i < 128 ; i++)
-        for(j = 0 ; j < 128 ; j++)
-            LL_append(q, allocMarker(j, i, j, i, 8));
-
-    LL_print(q);
-
-    imprintGrid(q, grid);
-
-    while(!LL_empty(q)) {
-        struct Marker *m = q->head->marker;
-        counters[m->colorKey]++;
-        LL_append(&lines[m->startRow], LL_removeHead(q));
-    }     
-
-    prioritizeMarkers(&priorityQueue, counters, n);
-
-    priority = priorityQueue.head;
-    while(priority != NULL) {
-        int c = priority->marker->colorKey;
-        priority = priority->next;
-        for(i = 0 ; i < LINE_LIMIT ; i++)
-            mergeRow(&lines[i], c);
-    }
-
-    printf("HORIZONTAL:\n");
-    for(i = 0 ; i < LINE_LIMIT ; i++) {
-        printf("%i\n", i);
-        LL_print(&lines[i]);
-    }
-
-    priority = priorityQueue.head;
-    if(!LL_empty(&lines[0])) /* Determining how much to increment by between lines. */
-        inc = lines[0].head->marker->endRow + 1;
-    while(priority != NULL) {
-        struct Node *prev, *n;
-        int c = priority->marker->colorKey, r1 = 0, r2 = 0;
-        priority = priority->next;
-        while(r2 < LINE_LIMIT) {
-            r1 = r2;
-            r2 = r1 + inc;
-
-            if(LL_empty(&lines[r1]))
-                continue;
-
-            if(r2 < LINE_LIMIT)
-                mergeTwoRows(&lines[r1], &lines[r2], q, c);
-
-            prev = NULL, n = lines[r1].head;
-            while(n != NULL) {
-                if(n->marker->colorKey == c)
-                    LL_append(q, LL_remove(&lines[r1], prev, &n));
-                else {
-                    prev = n;
-                    n = n->next;
-                }
-            }
-        }
-        printf("ENDING ROWS: %i %i\n", r1, r2);
-        printf("AFTER %i\n", c);
-        for(i = 0 ; i < LINE_LIMIT ; i++) {
-            printf("%i\n", i);
-            LL_print(&lines[i]);
-        }
-    }
-
-    printf("RESULTS:\n");
-    LL_print(q);
-
-    //testCommands(q, hdc, grid);
-
-    while(!LL_empty(q))
-        free(LL_removeHead(q));
-
-    freeGrid(grid);
-    free(counters);
 }
 
 void stringTest() {

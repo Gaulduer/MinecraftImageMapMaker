@@ -5,6 +5,7 @@ File: linkedList.c
 
 Timeline:
 20240808 - File created.
+20241113 - Fixed clone marker function.
 */
 
 #include "linkedList.h"
@@ -24,7 +25,7 @@ struct Marker* allocMarker(int startCol, int startRow, int endCol, int endRow, i
 }
 
 struct Marker* cloneMarker(struct Marker *m) {
-    return allocMarker(m->startCol, m->endCol, m->endCol, m->endRow, m->colorKey);
+    return allocMarker(m->startCol, m->startRow, m->endCol, m->endRow, m->colorKey);
 }
 
 struct Node* allocNode(struct Marker *m) {
