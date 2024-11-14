@@ -282,41 +282,9 @@ void prioritizeMarkers(struct LinkedList *pq, int *counters, int n) {
     }
 }
 
-void mergeRow(struct LinkedList **lines, int c) { /* Merges markers of color c in a single row together horizontally. */
+void extractColor(struct LinkedList (*lines)[128], int size, int c) { /* Merges markers of color c in a single row together horizontally. */
     int i;
-    for(i = 0 ; i < 128 ; i++) {
-        int low = 0;
-        struct Node *prev = NULL, *n = lines[0][i].head;
-        while(n != NULL) {
-            struct Marker *m1 = n->marker;
-            prev = n;
-            n = n->next;
-            if(m1->colorKey != c)
-                continue;
-            m1->low = low;
-            while(n != NULL) {
-                struct Marker *m2 = n->marker;
-                if(m1->high + 1 == m2->startCol && !m2->neuter) {
-                    m1->high = m2->endCol;
-                    if(m2->colorKey == c) {
-                        m1->endCol = m2->endCol;
-                        free(LL_remove(&lines[0][i], prev, &n));
-                    }
-                    else {
-                        prev = n;
-                        n = n->next;
-                    }
-                }
-                else
-                    break;
-            }
-        }
-    }
-}
-
-void extractColor(struct LinkedList (*lines)[128], int c) { /* Merges markers of color c in a single row together horizontally. */
-    int i;
-    for(i = 0 ; i < 128 ; i++) {
+    for(i = 0 ; i < 128 ; i += size) {
         int low = 0;
         struct Node *prev = NULL, *n = lines[0][i].head;
         while(n != NULL) {
@@ -355,16 +323,7 @@ void extractColor(struct LinkedList (*lines)[128], int c) { /* Merges markers of
 }
 
 int mergeMarker(struct Marker *m1, struct Marker *m2) {
-    int examine = 0;
-    if((m1->startCol == 32 || m2->startCol == 32) && (m1->startRow == 16 || m2->startRow == 16)) {
-        printf("EXAMINE!\n");
-        printMarker(m1);
-        printMarker(m2);
-        printf("%i %i\n", m1->neuter, m2->neuter);
-        examine = 1;
-    }
-
-    if(m1->startCol < m2->low || m1->endCol > m2->high) /* m1 cannot fit into m2. */
+    if(m1->startCol < m2->low || m1->endCol > m2->high || m2->startCol < m1->low || m2->endCol > m1->high) /* The markers cannot fit into eachother. */
         return 0;
 
     m2->startRow = m1->startRow; /* The startRow will always be taken from m1. */
@@ -375,12 +334,6 @@ int mergeMarker(struct Marker *m1, struct Marker *m2) {
     m2->low = m1->low > m2->low ? m1->low:m2->low;
     m2->high = m1->high < m2->high ? m1->high:m2->high;
 
-    if(examine) {
-        printf("RESULT!\n");
-        printMarker(m2);
-        getc(stdin);
-    }
-
     return 1;
 }
 
@@ -388,25 +341,24 @@ void mergeColor(struct LinkedList *q, struct LinkedList *lines /* This is just t
     int i;
 
     for(i = 0 ; i + size < 128 ; i += size) {
-        struct Node *prev1 = NULL, *n1 = lines[i].head, *prev2 = NULL, *n2 = lines[i + size].head;
+        struct Node *prev = NULL, *n1 = lines[i].head, *n2 = lines[i + size].head;
         while(n1 != NULL && n2 != NULL) {
             if(n1->marker->neuter) {
-                free(LL_remove(&lines[i], prev1, &n1));
+                prev = n1;
+                n1 = n1->next;
                 continue;
             }
-            
-            while(n2 != NULL && n2->marker->high < n1->marker->low) {
-                prev2 = n2;
+
+            while(n2 != NULL && n2->marker->high < n1->marker->startCol)
                 n2 = n2->next;
-            }
 
             if(n2 == NULL)
                 break;
 
-            if(mergeMarker(n1->marker, n2->marker)) /* The merge of the markers was successful. */
-                free(LL_remove(&lines[i], prev1, &n1));
-            else { /* The merge failed, leave behind the marker. */
-                prev1 = n1;
+            if(mergeMarker(n1->marker, n2->marker))
+                free(LL_remove(&lines[i], prev, &n1));
+            else {
+                prev = n1;
                 n1 = n1->next;
             }
         }
@@ -441,7 +393,7 @@ void mergeCommands(struct LinkedList (*lines)[128], struct LinkedList *q, int si
     while(!LL_empty(&priorityQueue)) {
         int c = priorityQueue.head->marker->colorKey;
         free(LL_removeHead(&priorityQueue));
-        extractColor(lines, c);
+        extractColor(lines, size, c);
         mergeColor(q, lines[1], size);
     }
 
