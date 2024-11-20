@@ -19,6 +19,7 @@ Timeline:
 Highlights any errors that will appear in the final resulting image. I intend to make a separate highlight that shows the area of the color that is correct.
 20241109 - The pixels shown for errors now get highlighted cyan if they are correct, magenta if they are wrong.
 20241113 - There is are new commands to merge markers. They do not work, oops!
+20241120 - Changed the prioritization method to consider 'breaks' in color rather than just counts of colors.
 */
 
 #include <windows.h>
@@ -103,7 +104,7 @@ void inputCommands(HDC hdc) {
     HWND selectedWindow;
     WCHAR name[128];
     char command[512];
-    struct Marker m;
+    struct Marker m = {0, 127, 0, 127, 0, 127, 0, 0};
     uint32_t color;
 
     GetAsyncKeyState(VK_CONTROL); /* In case control was pressed before. */
@@ -112,6 +113,11 @@ void inputCommands(HDC hdc) {
     GetWindowTextW(selectedWindow, name, 128);
     printf("Selected Window - %ls\n", name);
 
+    {
+        uint32_t *pixels = allocSolidColor(128, 128, 0x0FF00FF);
+        fillRectangle(hdc, pixels, 128, 0, 256, 128, 2);
+        free(pixels);
+    }
     Sleep(1000);
 
 	while(fgets(command, 512, commands)) {
@@ -121,6 +127,7 @@ void inputCommands(HDC hdc) {
         simulateCommand(hdc, &m, color, 128, 0);
     }
 
+    printf("Commands completed!\n");
     fclose(pixelColors);
     fclose(commands);
 }
@@ -225,43 +232,15 @@ struct Marker* allocQuadMarker(struct Quad *q) {
     return allocMarker(q->col, q->row, q->col + q->size - 1, q->row + q->size - 1, q->color);
 }
 
-int quad(struct Quad *q, struct LinkedList *parentQueue, int *layers, int limit, int layer) {
-    struct LinkedList queue = {NULL, NULL};
-    int i, priority, priorities[4];
+void quad(struct Quad *q, struct LinkedList *queue, int *layers, int limit, int layer) {
+    int i;
     if(q->size <= limit || q->leaf) {
-        LL_append(parentQueue, allocQuadMarker(q));
-        return layers[q->color];
+        LL_append(queue, allocQuadMarker(q));
+        return;
     }
 
-    if(layers[q->color] > layer) /* This if statement ensures a layer for a color wont be reset unless it was still at __INT_MAX__ */
-        layers[q->color] = layer;
-    priority = layers[q->color];
-
     for(i = 0 ; i < 4 ; i++)
-        priorities[i] = quad(q->children[i], &queue, layers, limit, layer + 1);
-
-    for(i = 0 ; i < 4 ; i++)
-        if(priorities[i] < priority)
-            priority = priorities[i]; 
-
-    /* Note do not add a condition such as layer == layers[q->color]. Doing this will let us avoid picking out colors, but we cannot put colors 'back in'. If a higher layer command falls through, necessary commands will be missing. */
-    if(priority >= layers[q->color]) { /* If the priority is not more signifcant than the layer, we can cover this area with a single command for the color. */
-        LL_append(parentQueue, allocQuadMarker(q));
-        while(!LL_empty(&queue)) { /* Picking out extra commands for this layer's color. */
-            if(queue.head->marker->colorKey == q->color) /* Toss out all nodes that match this layer's color. */
-                free(LL_removeHead(&queue));
-            else
-                LL_append(parentQueue, LL_removeHead(&queue));
-        }
-    }
-    else 
-        while(!LL_empty(&queue))
-            LL_append(parentQueue, LL_removeHead(&queue));
-
-    if(layer == layers[q->color])
-        layers[q->color] = __INT_MAX__;
-
-    return priority;
+        quad(q->children[i], queue, layers, limit, layer + 1);
 }
 
 void prioritizeMarkers(struct LinkedList *pq, int *counters, int n) {
@@ -282,9 +261,9 @@ void prioritizeMarkers(struct LinkedList *pq, int *counters, int n) {
     }
 }
 
-void extractColor(struct LinkedList (*lines)[128], int size, int c) { /* Merges markers of color c in a single row together horizontally. */
+void extractColor(struct LinkedList (*lines)[128], int c) { /* Merges markers of color c in a single row together horizontally. */
     int i;
-    for(i = 0 ; i < 128 ; i += size) {
+    for(i = 0 ; i < 128 ; i++) {
         int low = 0;
         struct Node *prev = NULL, *n = lines[0][i].head;
         while(n != NULL) {
@@ -337,11 +316,11 @@ int mergeMarker(struct Marker *m1, struct Marker *m2) {
     return 1;
 }
 
-void mergeColor(struct LinkedList *q, struct LinkedList *lines /* This is just the 'single color' set of lines. */, int size) {
+void mergeColor(struct LinkedList *q, struct LinkedList *lines /* This is just the 'single color' set of lines. */, int detail) {
     int i;
 
-    for(i = 0 ; i + size < 128 ; i += size) {
-        struct Node *prev = NULL, *n1 = lines[i].head, *n2 = lines[i + size].head;
+    for(i = 0 ; i < 127 ; i++) {
+        struct Node *prev = NULL, *n1 = lines[i].head, *n2 = lines[i + detail].head;
         while(n1 != NULL && n2 != NULL) {
             if(n1->marker->neuter) {
                 prev = n1;
@@ -364,7 +343,7 @@ void mergeColor(struct LinkedList *q, struct LinkedList *lines /* This is just t
         }
     }
 
-    for(i = 0 ; i < 128 ; i += size) {
+    for(i = 0 ; i < 128 ; i++) {
         while(!LL_empty(&lines[i]))
             if(lines[i].head->marker->neuter)
                 free(LL_removeHead(&lines[i]));
@@ -373,19 +352,38 @@ void mergeColor(struct LinkedList *q, struct LinkedList *lines /* This is just t
     }
 }
 
-void mergeCommands(struct LinkedList (*lines)[128], struct LinkedList *q, int size, int colors) {
-    int i;
+void mergeCommands(struct LinkedList (*lines)[128], struct LinkedList *q, int colors, int detail) {
+    int i, lastColor = -1;
     int *counters = malloc(colors * sizeof(int));
-    struct Node *n = NULL;
     struct LinkedList priorityQueue = {NULL, NULL};
 
     for(i = 0 ; i < colors ; i++)
         counters[i] = 0;
 
     while(!LL_empty(q)) {
-        struct Marker *m = q->head->marker;
-        counters[m->colorKey]++;
-        LL_append(&lines[0][m->startRow], LL_removeHead(q));
+        struct Marker *m = LL_removeHead(q);
+        LL_append(&lines[0][m->startRow], m);
+        LL_append(&lines[1][m->startCol], m);
+    }
+
+    for(i = 0 ; i < 128 ; i++) {
+        int lastColor = -1;
+        struct Node *n = lines[0][i].head;
+        while(n != NULL) {
+            if(lastColor != n->marker->colorKey) {
+                counters[n->marker->colorKey]++;
+                lastColor = n->marker->colorKey;
+            }
+            n = n->next;
+        }
+        lastColor = -1;
+        while(!LL_empty(&lines[1][i])) {
+            if(lastColor != lines[1][i].head->marker->colorKey) {
+                counters[lines[1][i].head->marker->colorKey]++;
+                lastColor = lines[1][i].head->marker->colorKey;
+            }
+            LL_removeHead(&lines[1][i]);
+        }
     }
 
     prioritizeMarkers(&priorityQueue, counters, colors);
@@ -393,27 +391,14 @@ void mergeCommands(struct LinkedList (*lines)[128], struct LinkedList *q, int si
     while(!LL_empty(&priorityQueue)) {
         int c = priorityQueue.head->marker->colorKey;
         free(LL_removeHead(&priorityQueue));
-        extractColor(lines, size, c);
-        mergeColor(q, lines[1], size);
-    }
-
-    for(i = 0 ; i < 128 ; i++) {
-        if(!LL_empty(&lines[0][i]) || !LL_empty(&lines[0][i])) {
-            printf("CLEARING ERROR!");
-            getc(stdin);
-        }
+        extractColor(lines, c);
+        mergeColor(q, lines[1], detail);
     }
 }
 
-void optimizeCommands(struct LinkedList *queue, int colors) {
-    int i, size = 128, sizes[8];
-    struct LinkedList priorityQueue = {NULL, NULL}, cats[8] /* These linked lists seperate commands based on their size category. */, lines[2][128];
-    for(i = 0 ; i < 8 ; i++) {
-        sizes[i] = size;
-        size /= 2;
-        cats[i].head = NULL;
-        cats[i].tail = NULL;
-    }
+void optimizeCommands(struct LinkedList *queue, int colors, int detail) {
+    int i;
+    struct LinkedList priorityQueue = {NULL, NULL}, lines[2][128];
     for(i = 0 ; i < 128 ; i++) {
         lines[0][i].head = NULL;
         lines[0][i].tail = NULL;
@@ -421,22 +406,7 @@ void optimizeCommands(struct LinkedList *queue, int colors) {
         lines[1][i].tail = NULL;
     }
 
-    while(!LL_empty(queue)) {
-        struct Marker *m = queue->head->marker;
-        int width = (m->endCol - m->startCol + 1);
-        for(i = 0 ; i < 8 ; i++) {
-            if(sizes[i] == width)
-                LL_append(&cats[i], LL_removeHead(queue));
-        }
-    } 
-
-    for(i = 0 ; i < 8 ; i++)
-        mergeCommands(lines, &cats[i], sizes[i], colors);
-
-    for(i = 0 ; i < 8 ; i++) {
-        while(!LL_empty(&cats[i]))
-            LL_append(queue, LL_removeHead(&cats[i]));
-    }
+    mergeCommands(lines, queue, colors, detail);
 }
 
 void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, struct LinkedList *q) {
@@ -449,7 +419,6 @@ void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, 
         for(i = m->endRow ; i >= m->startRow ; i--)
             for(j = m->startCol ; j <= m->endCol ; j++) {
                 if(original[i][j] != optimized[i][j] && optimized[i][j] == m->colorKey) {
-                    printf("UH OH AT (%i, %i)\n", j, i);
                     wrong = 1;
                     pixels[p] = 0x00FF00FF; /* Marking incorrect pixels as magenta. */
                 }
@@ -475,7 +444,7 @@ void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, 
 void generateCommands(struct Quad q, char **colors, uint32_t *pixelKey, HDC hdc) {
     FILE *commands = fopen("commands.txt", "w"), *pixelColors = fopen("pixelColors.txt", "w");
     struct LinkedList commandQueue = {NULL, NULL};
-    int i, n = 0, *layers, **originalGrid = allocGrid(), **optimizedGrid = allocGrid();
+    int i, n = 0, detail = 8, *layers, **originalGrid = allocGrid(), **optimizedGrid = allocGrid();
 
     while(colors[i++] != NULL);
     n = i - 1;
@@ -485,9 +454,9 @@ void generateCommands(struct Quad q, char **colors, uint32_t *pixelKey, HDC hdc)
     for(i = 0 ; i < n ; i++)
         layers[i] = __INT_MAX__;
 
-    quad(&q, &commandQueue, layers, 1, 0);
+    quad(&q, &commandQueue, layers, detail, 0);
     imprintGrid(&commandQueue, originalGrid);
-    optimizeCommands(&commandQueue, n);
+    optimizeCommands(&commandQueue, n, detail);
     imprintGrid(&commandQueue, optimizedGrid);
     testCommands(hdc, pixelKey, originalGrid, optimizedGrid, &commandQueue);
 
@@ -621,10 +590,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
     HWND hwnd = CreateWindowW(wc.lpszClassName, wc.lpszMenuName, WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 528, 394, NULL, NULL, NULL, NULL);
     CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 256, 528, 100, hwnd, 0, NULL, NULL);
 
-    readImage(GetDC(hwnd), 2, "gurt.bmp", "colorKeys\\all.csv");
-    //mergeTest(GetDC(hwnd), "colorKeys\\all.csv");
-    //rgbTest(GetDC(hwnd), "colorKeys\\all.csv");
-    //stringTest();
+    readImage(GetDC(hwnd), 2, "billCipher.bmp", "colorKeys\\all.csv");
 
     MSG msg = {};
     msg.hwnd = hwnd;
