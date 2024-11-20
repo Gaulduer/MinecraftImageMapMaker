@@ -444,7 +444,7 @@ void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, 
 void generateCommands(struct Quad q, char **colors, uint32_t *pixelKey, HDC hdc) {
     FILE *commands = fopen("commands.txt", "w"), *pixelColors = fopen("pixelColors.txt", "w");
     struct LinkedList commandQueue = {NULL, NULL};
-    int i, n = 0, detail = 8, *layers, **originalGrid = allocGrid(), **optimizedGrid = allocGrid();
+    int i, n = 0, detail = 1, *layers, **originalGrid = allocGrid(), **optimizedGrid = allocGrid();
 
     while(colors[i++] != NULL);
     n = i - 1;
@@ -556,7 +556,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             PostMessageW(hwnd, WM_QUIT, 0, 0);
         case WM_COMMAND: {
             switch(wp) {
-                case 0: {
+                case 1: {
                     printf("Inputing commands...\n");
                     inputCommands(GetDC(hwnd));
                 } break;
@@ -588,9 +588,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
     RegisterClassW(&wc);
 
     HWND hwnd = CreateWindowW(wc.lpszClassName, wc.lpszMenuName, WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 528, 394, NULL, NULL, NULL, NULL);
-    CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 256, 528, 100, hwnd, 0, NULL, NULL);
+    CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 256, 528, 100, hwnd, (HMENU)1, NULL, NULL);
 
-    readImage(GetDC(hwnd), 2, "billCipher.bmp", "colorKeys\\all.csv");
+    readImage(GetDC(hwnd), 2, "gurt.bmp", "colorKeys\\grayScale.csv");
 
     MSG msg = {};
     msg.hwnd = hwnd;
