@@ -19,6 +19,7 @@ Timeline:
 Highlights any errors that will appear in the final resulting image. I intend to make a separate highlight that shows the area of the color that is correct.
 20241109 - The pixels shown for errors now get highlighted cyan if they are correct, magenta if they are wrong.
 20241113 - There is are new commands to merge markers. They do not work, oops!
+20241120 - Changed the prioritization method to consider 'breaks' in color rather than just counts of colors.
 */
 
 #include <windows.h>
