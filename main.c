@@ -514,7 +514,6 @@ uint32_t* getPixelKey(FILE *colorKey, int n) {
 void readImage(HDC hdc, int scale, char *image, char *key) {
     FILE *fr = fopen(image, "rb");
     FILE *colorKey = fopen(key, "r");
-    FILE *colorIndices = fopen("colorIndices.txt", "w");
     int **grid = allocGrid();
     int transparency = 0, i, j, p = 0, n = amountOfColors(colorKey);
     struct BMPHeader h = readBMPHeader(fr);
@@ -547,7 +546,6 @@ void readImage(HDC hdc, int scale, char *image, char *key) {
     free(pixelKey);
     fclose(fr);
     fclose(colorKey);
-    fclose(colorIndices);
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
