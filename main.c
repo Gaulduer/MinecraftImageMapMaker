@@ -20,6 +20,8 @@ Highlights any errors that will appear in the final resulting image. I intend to
 20241109 - The pixels shown for errors now get highlighted cyan if they are correct, magenta if they are wrong.
 20241113 - There is are new commands to merge markers. They do not work, oops!
 20241120 - Changed the prioritization method to consider 'breaks' in color rather than just counts of colors.
+20241123 - Restructuring of project to later help with combo boxes. Places images and colorKey files into their respective folders.
+20241125 - Combo boxes successfully added to allow for selection of preset images and color keys.
 */
 
 #include <windows.h>
@@ -30,6 +32,7 @@ Highlights any errors that will appear in the final resulting image. I intend to
 #include "bmp.h"
 #include "linkedList.h"
 #include "quad.h"
+#include "string.h"
 
 #define LINE_LIMIT 128
 
@@ -548,33 +551,68 @@ void readImage(HDC hdc, int scale, char *image, char *key) {
     fclose(colorKey);
 }
 
+void fillComboBox(HWND comboBox, char *fileName) {
+    int i;
+    WCHAR buffer[128];
+    FILE *csv = fopen(fileName, "r");
+
+    while(fscanf(csv, "%ls", buffer) != EOF)
+        SendMessageW(comboBox, CB_ADDSTRING, (WPARAM)0, (LPARAM)buffer);
+
+    SendMessageW(comboBox, CB_SETCURSEL, (WPARAM)0, 0);
+}
+
+void getComboBoxText(HWND combo, char *dest) {
+    int index;
+    WCHAR buffer[128];
+    index = SendMessageW(combo, CB_GETCURSEL, 0, 0);
+    SendMessageW(combo, CB_GETLBTEXT, (WPARAM)index, (LPARAM)buffer);
+    sprintf(dest, "%ls", buffer);
+}
+
+void imageChange(HWND parent) {
+    char image[128] = "images\\", colorKey[128] = "colorKeys\\";
+    HWND combo1 = FindWindowExW(parent, NULL, NULL, NULL), combo2 = FindWindowExW(parent, combo1, NULL, NULL);
+    getComboBoxText(combo1, image + strlen(image));
+    getComboBoxText(combo2, colorKey + strlen(colorKey));
+    readImage(GetDC(parent), 2, image, colorKey);
+}
+
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    int scale = 2;
     switch(msg) {
+        case WM_CREATE: {
+            HWND combo;
+            combo = CreateWindowW(L"ComboBox", L"Select Image", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 0, 256, 264, 100, hwnd, NULL, NULL, NULL);
+            CreateWindowW(L"ComboBox", L"Select Color Key", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 256, 256, 264, 100, hwnd, NULL, NULL, NULL);
+            CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 281, 528, 100, hwnd, (HMENU)0, NULL, NULL);
+            fillComboBox(combo, "images\\images.csv");
+            fillComboBox(FindWindowExW(hwnd, combo, NULL, NULL), "colorKeys\\colorKeys.csv"); 
+        } break;
         case WM_CLOSE:
             PostMessageW(hwnd, WM_QUIT, 0, 0);
+            break;
         case WM_COMMAND: {
-            switch(wp) {
-                case 1: {
-                    printf("Inputing commands...\n");
-                    inputCommands(GetDC(hwnd));
+            switch(HIWORD(wp)) {
+                case 0: {
+                    switch(wp) {
+                        case 0: {
+                            printf("Inputing commands...\n");
+                            inputCommands(GetDC(hwnd));
+                        } break;
+                        default:
+                            printf("No command associated with WP %i\n", wp);
+                    }
+                }
+                case CBN_SELCHANGE: {
+                    imageChange(hwnd);
                 } break;
-                default:
-                    printf("No command associated with WP %i", wp);
             }
         }
         default: 
             return DefWindowProcW(hwnd, msg, wp, lp);
     }
     return 0;
-}
-
-void stringTest() {
-    char *command = "/fill ~0 ~-1 ~0 ~125 ~-1 ~127 minecraft:gray_terracotta";
-    struct Marker m;
-
-    sscanf(command, "/fill ~%i ~-1 ~%i ~%i ~-1 ~%i", &m.startCol, &m.startRow, &m.endCol, &m.endRow);
-
-    printf("%i %i %i %i\n", m.startCol, m.startRow, m.endCol, m.endRow);
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int cmdShow) {
@@ -585,10 +623,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
     wc.lpszMenuName = L"Minecraft Image Map Maker";
     RegisterClassW(&wc);
 
-    HWND hwnd = CreateWindowW(wc.lpszClassName, wc.lpszMenuName, WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 528, 394, NULL, NULL, NULL, NULL);
-    CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 256, 528, 100, hwnd, (HMENU)1, NULL, NULL);
-
-    readImage(GetDC(hwnd), 2, "gurt.bmp", "colorKeys\\grayScale.csv");
+    HWND hwnd = CreateWindowW(wc.lpszClassName, wc.lpszMenuName, WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 528, 404, NULL, NULL, NULL, NULL);
 
     MSG msg = {};
     msg.hwnd = hwnd;
