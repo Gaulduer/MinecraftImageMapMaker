@@ -625,6 +625,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
 
     HWND hwnd = CreateWindowW(wc.lpszClassName, wc.lpszMenuName, WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 528, 404, NULL, NULL, NULL, NULL);
 
+    imageChange(hwnd); /* Placing an image change to help display the image when the window first pops up. */
+
     MSG msg = {};
     msg.hwnd = hwnd;
     while(GetMessage(&msg, 0, 0, 0)) {
