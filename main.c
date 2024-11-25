@@ -190,7 +190,7 @@ int getDiff(struct RGBColor c1, struct RGBColor c2) {
 
 int selectColorIndex(struct RGBColor compare, FILE *colorKey) {
     char block[128], blockBuffer[128];
-    int line = 0, index, diff, diffBuffer, r, g, b;
+    int line = 0, index = 0, diff, diffBuffer, r, g, b;
     struct RGBColor rgb, rgbBuffer;
 
     rewind(colorKey);
