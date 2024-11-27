@@ -22,6 +22,8 @@ Highlights any errors that will appear in the final resulting image. I intend to
 20241120 - Changed the prioritization method to consider 'breaks' in color rather than just counts of colors.
 20241123 - Restructuring of project to later help with combo boxes. Places images and colorKey files into their respective folders.
 20241125 - Combo boxes successfully added to allow for selection of preset images and color keys.
+20241127 - Message loop altered. Set up before would cause the window to crash when interacted with while inputting commands.
+New set up does not cause a crash when interacting with the window, as commands are run inside the message loop.
 */
 
 #include <windows.h>
@@ -101,40 +103,36 @@ void simulateCommand(HDC hdc, struct Marker *m, uint32_t color, int xOffset, int
     free(pixels);
 }
 
-void inputCommands(HDC hdc) {
-    FILE *commands = fopen("commands.txt", "r"), *pixelColors = fopen("pixelColors.txt", "r");
-    INPUT ip;
+void clearDisplay(HDC hdc) {
+    uint32_t *pixels = allocSolidColor(128, 128, 0x0FF00FF);
+    fillRectangle(hdc, pixels, 128, 0, 256, 128, 2);
+    free(pixels);
+}
+
+int progressCommands(HDC hdc, HWND selectedWindow, FILE *commands, FILE *colors) {
+    struct Marker m;
+    uint32_t color;
+    char command[512];
+
+    if(!fgets(command, 512, commands))
+        return 0;
+
+    fscanf(colors, "%u", &color);
+    sscanf(command, "/fill ~%i ~-1 ~%i ~%i ~-1 ~%i", &m.startCol, &m.startRow, &m.endCol, &m.endRow);
+    inputCommand(selectedWindow, command);
+    simulateCommand(hdc, &m, color, 128, 0);
+
+    return 1;
+}
+
+HWND selectWindow() {
     HWND selectedWindow;
     WCHAR name[128];
-    char command[512];
-    struct Marker m = {0, 127, 0, 127, 0, 127, 0, 0};
-    uint32_t color;
-
-    GetAsyncKeyState(VK_CONTROL); /* In case control was pressed before. */
-    while(!GetAsyncKeyState(VK_CONTROL));
     selectedWindow = GetForegroundWindow();
     GetWindowTextW(selectedWindow, name, 128);
     printf("Selected Window - %ls\n", name);
-
-    {
-        uint32_t *pixels = allocSolidColor(128, 128, 0x0FF00FF);
-        fillRectangle(hdc, pixels, 128, 0, 256, 128, 2);
-        free(pixels);
-    }
-    Sleep(1000);
-
-	while(fgets(command, 512, commands)) {
-        fscanf(pixelColors, "%u", &color);
-        sscanf(command, "/fill ~%i ~-1 ~%i ~%i ~-1 ~%i", &m.startCol, &m.startRow, &m.endCol, &m.endRow);
-        inputCommand(selectedWindow, command);
-        simulateCommand(hdc, &m, color, 128, 0);
-    }
-
-    printf("Commands completed!\n");
-    fclose(pixelColors);
-    fclose(commands);
+    return selectedWindow;
 }
-
 
 void imprintGrid(struct LinkedList *queue, int **grid) {
     int i, j;
@@ -596,14 +594,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             switch(HIWORD(wp)) {
                 case 0: {
                     switch(wp) {
-                        case 0: {
-                            printf("Inputing commands...\n");
-                            inputCommands(GetDC(hwnd));
+                        case 0: { /* This posts a message so the message loop will see it. */
+                            PostMessageW(hwnd, WM_COMMAND, 1, 0);
                         } break;
+                        case 1: /* This is simply here to catch the message sent from case 0. */
+                            break;
                         default:
                             printf("No command associated with WP %i\n", wp);
                     }
-                }
+                } break;
                 case CBN_SELCHANGE: {
                     imageChange(hwnd);
                 } break;
@@ -616,6 +615,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int cmdShow) {
+    int phase = 0;
+    FILE *commands = NULL, *colors = NULL;
+    HWND selectedWindow;
     WNDCLASSW wc = {};
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
@@ -629,9 +631,35 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
 
     MSG msg = {};
     msg.hwnd = hwnd;
-    while(GetMessage(&msg, 0, 0, 0)) {
+    msg.message = WM_CREATE;
+    while(msg.message != WM_QUIT) {
+        PeekMessageW(&msg, hwnd, 0, 0, PM_REMOVE);
         TranslateMessage(&msg);
         DispatchMessage(&msg);
+        if(phase == 0 && msg.message == WM_COMMAND) {
+            phase = 1;
+            printf("Select your window...\n");
+            GetAsyncKeyState(VK_CONTROL); /* In case control was pressed before. */
+        }
+        else if(phase == 1 && GetAsyncKeyState(VK_CONTROL)) {
+            phase = 2;
+            selectedWindow = selectWindow();
+            commands = fopen("commands.txt", "r");
+            colors = fopen("pixelColors.txt", "r");
+            clearDisplay(GetDC(hwnd));
+        }
+        else if(phase == 2 && !progressCommands(GetDC(hwnd), selectedWindow, commands, colors)){
+            phase = 0;
+            fclose(commands);
+            fclose(colors);
+            commands = NULL;
+            colors = NULL;
+        }
+    }
+
+    if(commands != NULL) {
+        fclose(commands);
+        fclose(colors);
     }
 
     return 0;
