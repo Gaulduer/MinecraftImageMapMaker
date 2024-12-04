@@ -24,6 +24,8 @@ Highlights any errors that will appear in the final resulting image. I intend to
 20241125 - Combo boxes successfully added to allow for selection of preset images and color keys.
 20241127 - Message loop altered. Set up before would cause the window to crash when interacted with while inputting commands.
 New set up does not cause a crash when interacting with the window, as commands are run inside the message loop.
+20241204 - Image change is now triggered within the message loop and not the window procedure. 
+New combo box added for level of detail.
 */
 
 #include <windows.h>
@@ -442,10 +444,10 @@ void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, 
     }
 }
 
-void generateCommands(struct Quad q, char **colors, uint32_t *pixelKey, HDC hdc) {
+void generateCommands(struct Quad q, char **colors, uint32_t *pixelKey, int detail, HDC hdc) {
     FILE *commands = fopen("commands.txt", "w"), *pixelColors = fopen("pixelColors.txt", "w");
     struct LinkedList commandQueue = {NULL, NULL};
-    int i, n = 0, detail = 1, *layers, **originalGrid = allocGrid(), **optimizedGrid = allocGrid();
+    int i, n = 0, *layers, **originalGrid = allocGrid(), **optimizedGrid = allocGrid();
 
     while(colors[i++] != NULL);
     n = i - 1;
@@ -512,7 +514,7 @@ uint32_t* getPixelKey(FILE *colorKey, int n) {
     return pixels;
 }
 
-void readImage(HDC hdc, int scale, char *image, char *key) {
+void readImage(HDC hdc, int scale, int detail, char *image, char *key) {
     FILE *fr = fopen(image, "rb");
     FILE *colorKey = fopen(key, "r");
     int **grid = allocGrid();
@@ -537,7 +539,7 @@ void readImage(HDC hdc, int scale, char *image, char *key) {
     }
 
     q = buildQuadOG(grid, 128);
-    generateCommands(q, colors, pixelKey, hdc);
+    generateCommands(q, colors, pixelKey, detail, hdc);
     destroyQuad(&q);
     freeGrid(grid);
     for(i = 0 ; colors[i] != NULL ; i++)
@@ -569,11 +571,15 @@ void getComboBoxText(HWND combo, char *dest) {
 }
 
 void imageChange(HWND parent) {
-    char image[128] = "images\\", colorKey[128] = "colorKeys\\";
+    char image[128] = "images\\", colorKey[128] = "colorKeys\\", detailBuffer[4];
+    int detail = 0;
     HWND combo1 = FindWindowExW(parent, NULL, NULL, NULL), combo2 = FindWindowExW(parent, combo1, NULL, NULL);
+    HWND combo3 = FindWindowExW(parent, combo2, NULL, NULL);
     getComboBoxText(combo1, image + strlen(image));
     getComboBoxText(combo2, colorKey + strlen(colorKey));
-    readImage(GetDC(parent), 2, image, colorKey);
+    getComboBoxText(combo3, detailBuffer);
+    sscanf(detailBuffer, "%i", &detail);
+    readImage(GetDC(parent), 2, detail, image, colorKey);
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -581,11 +587,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch(msg) {
         case WM_CREATE: {
             HWND combo;
-            combo = CreateWindowW(L"ComboBox", L"Select Image", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 0, 256, 264, 100, hwnd, NULL, NULL, NULL);
-            CreateWindowW(L"ComboBox", L"Select Color Key", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 256, 256, 264, 100, hwnd, NULL, NULL, NULL);
-            CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 281, 528, 100, hwnd, (HMENU)0, NULL, NULL);
+            combo = CreateWindowW(L"ComboBox", L"Select Image", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 0, 256, 514, 100, hwnd, NULL, NULL, NULL);
+            CreateWindowW(L"ComboBox", L"Select Color Key", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 0, 276, 264, 100, hwnd, NULL, NULL, NULL);
+            CreateWindowW(L"ComboBox", L"Select Color Key", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 256, 276, 264, 100, hwnd, NULL, NULL, NULL);
+            CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 301, 528, 75, hwnd, (HMENU)0, NULL, NULL);
             fillComboBox(combo, "images\\images.csv");
-            fillComboBox(FindWindowExW(hwnd, combo, NULL, NULL), "colorKeys\\colorKeys.csv"); 
+            combo = FindWindowExW(hwnd, combo, NULL, NULL);
+            fillComboBox(combo, "colorKeys\\colorKeys.csv");
+            combo = FindWindowExW(hwnd, combo, NULL, NULL);
+            fillComboBox(combo, "sizes.csv");
         } break;
         case WM_CLOSE:
             PostMessageW(hwnd, WM_QUIT, 0, 0);
@@ -595,16 +605,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 case 0: {
                     switch(wp) {
                         case 0: { /* This posts a message so the message loop will see it. */
-                            PostMessageW(hwnd, WM_COMMAND, 1, 0);
+                            PostMessageW(hwnd, WM_NULL, 1, 0);
                         } break;
-                        case 1: /* This is simply here to catch the message sent from case 0. */
-                            break;
                         default:
                             printf("No command associated with WP %i\n", wp);
                     }
                 } break;
                 case CBN_SELCHANGE: {
-                    imageChange(hwnd);
+                    PostMessageW(hwnd, WM_NULL, 0, 0);
                 } break;
             }
         }
@@ -633,10 +641,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
     msg.hwnd = hwnd;
     msg.message = WM_CREATE;
     while(msg.message != WM_QUIT) {
-        PeekMessageW(&msg, hwnd, 0, 0, PM_REMOVE);
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-        if(phase == 0 && msg.message == WM_COMMAND) {
+        if(PeekMessageW(&msg, hwnd, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+
+        if(phase == 0 && msg.message == WM_NULL && msg.wParam == 0)
+            imageChange(hwnd);
+        if(phase == 0 && msg.message == WM_NULL && msg.wParam == 1) {
             phase = 1;
             printf("Select your window...\n");
             GetAsyncKeyState(VK_CONTROL); /* In case control was pressed before. */
@@ -662,5 +674,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
         fclose(colors);
     }
 
+    DestroyWindow(hwnd);
+    UnregisterClassW(L"main", hInstance);
     return 0;
 } 
