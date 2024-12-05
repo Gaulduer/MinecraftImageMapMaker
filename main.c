@@ -445,7 +445,7 @@ void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, 
 }
 
 void generateCommands(struct Quad q, char **colors, uint32_t *pixelKey, int detail, HDC hdc) {
-    FILE *commands = fopen("commands.txt", "w"), *pixelColors = fopen("pixelColors.txt", "w");
+    FILE *commands = fopen(".\\commands.txt", "w"), *pixelColors = fopen(".\\pixelColors.txt", "w");
     struct LinkedList commandQueue = {NULL, NULL};
     int i, n = 0, *layers, **originalGrid = allocGrid(), **optimizedGrid = allocGrid();
 
@@ -556,6 +556,11 @@ void fillComboBox(HWND comboBox, char *fileName) {
     WCHAR buffer[128];
     FILE *csv = fopen(fileName, "r");
 
+    if(csv == NULL) {
+        printf("%s failed to open.\n", fileName);
+        return;
+    }
+
     while(fscanf(csv, "%ls", buffer) != EOF)
         SendMessageW(comboBox, CB_ADDSTRING, (WPARAM)0, (LPARAM)buffer);
 
@@ -573,11 +578,12 @@ void getComboBoxText(HWND combo, char *dest) {
 void imageChange(HWND parent) {
     char image[128] = "images\\", colorKey[128] = "colorKeys\\", detailBuffer[4];
     int detail = 0;
-    HWND combo1 = FindWindowExW(parent, NULL, NULL, NULL), combo2 = FindWindowExW(parent, combo1, NULL, NULL);
-    HWND combo3 = FindWindowExW(parent, combo2, NULL, NULL);
-    getComboBoxText(combo1, image + strlen(image));
-    getComboBoxText(combo2, colorKey + strlen(colorKey));
-    getComboBoxText(combo3, detailBuffer);
+    HWND combo = FindWindowExW(parent, NULL, NULL, NULL);
+    getComboBoxText(combo, image + strlen(image));
+    combo = FindWindowExW(parent, combo, NULL, NULL);
+    getComboBoxText(combo, colorKey + strlen(colorKey));
+    combo = FindWindowExW(parent, combo, NULL, NULL);
+    getComboBoxText(combo, detailBuffer);
     sscanf(detailBuffer, "%i", &detail);
     readImage(GetDC(parent), 2, detail, image, colorKey);
 }
@@ -586,10 +592,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     int scale = 2;
     switch(msg) {
         case WM_CREATE: {
-            HWND combo;
-            combo = CreateWindowW(L"ComboBox", L"Select Image", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 0, 256, 514, 100, hwnd, NULL, NULL, NULL);
+            HWND combo = CreateWindowW(L"ComboBox", L"Select Image", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 0, 256, 514, 100, hwnd, NULL, NULL, NULL);
             CreateWindowW(L"ComboBox", L"Select Color Key", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 0, 276, 264, 100, hwnd, NULL, NULL, NULL);
-            CreateWindowW(L"ComboBox", L"Select Color Key", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 256, 276, 264, 100, hwnd, NULL, NULL, NULL);
+            CreateWindowW(L"ComboBox", L"Select Detail", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 256, 276, 264, 100, hwnd, NULL, NULL, NULL);
             CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 301, 528, 75, hwnd, (HMENU)0, NULL, NULL);
             fillComboBox(combo, "images\\images.csv");
             combo = FindWindowExW(hwnd, combo, NULL, NULL);
