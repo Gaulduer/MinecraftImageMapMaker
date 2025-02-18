@@ -26,6 +26,8 @@ Highlights any errors that will appear in the final resulting image. I intend to
 New set up does not cause a crash when interacting with the window, as commands are run inside the message loop.
 20241204 - Image change is now triggered within the message loop and not the window procedure. 
 New combo box added for level of detail.
+20241209 - Begining to make UI components and window scalable.
+20250218 - Made the window's UI components scale when resized.
 */
 
 #include <windows.h>
@@ -36,7 +38,8 @@ New combo box added for level of detail.
 #include "bmp.h"
 #include "linkedList.h"
 #include "quad.h"
-#include "string.h"
+#include "windowUtil.h"
+#include "display.h"
 
 #define LINE_LIMIT 128
 
@@ -99,19 +102,19 @@ void inputCommand(HWND selectedWindow, char *command) {
     SendMessageW(selectedWindow, WM_KEYDOWN, VK_RETURN, 0);
 }
 
-void simulateCommand(HDC hdc, struct Marker *m, uint32_t color, int xOffset, int yOffset) {
+void simulateCommand(HDC hdc, struct Marker *m, uint32_t color, int xOffset, int yOffset, int scale) {
     uint32_t *pixels = allocSolidColor(m->endCol - m->startCol + 1, m->endRow - m->startRow + 1, color);
-    fillRectangle(hdc, pixels, m->startCol + xOffset, m->startRow + yOffset, m->endCol + 1 + xOffset, m->endRow + 1 + yOffset, 2);
+    fillRectangle(hdc, pixels, m->startCol + xOffset, m->startRow + yOffset, m->endCol + 1 + xOffset, m->endRow + 1 + yOffset, scale);
     free(pixels);
 }
 
-void clearDisplay(HDC hdc) {
+void clearDisplay(HDC hdc, int scale) {
     uint32_t *pixels = allocSolidColor(128, 128, 0x0FF00FF);
-    fillRectangle(hdc, pixels, 128, 0, 256, 128, 2);
+    fillRectangle(hdc, pixels, 128, 0, 256, 128, scale);
     free(pixels);
 }
 
-int progressCommands(HDC hdc, HWND selectedWindow, FILE *commands, FILE *colors) {
+int progressCommands(HDC hdc, HWND selectedWindow, FILE *commands, FILE *colors, int scale) {
     struct Marker m;
     uint32_t color;
     char command[512];
@@ -122,7 +125,7 @@ int progressCommands(HDC hdc, HWND selectedWindow, FILE *commands, FILE *colors)
     fscanf(colors, "%u", &color);
     sscanf(command, "/fill ~%i ~-1 ~%i ~%i ~-1 ~%i", &m.startCol, &m.startRow, &m.endCol, &m.endRow);
     inputCommand(selectedWindow, command);
-    simulateCommand(hdc, &m, color, 128, 0);
+    simulateCommand(hdc, &m, color, 128, 0, scale);
 
     return 1;
 }
@@ -412,7 +415,7 @@ void optimizeCommands(struct LinkedList *queue, int colors, int detail) {
     mergeCommands(lines, queue, colors, detail);
 }
 
-void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, struct LinkedList *q) {
+void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, int scale, struct LinkedList *q) {
     int i, j, count = 1;
     struct Node *n = q->head;
     while(n != NULL) {
@@ -429,14 +432,14 @@ void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, 
             }
 
         if(wrong) {
-            fillRectangle(hdc, pixels, m->startCol + 128, m->startRow, m->endCol + 1 + 128, m->endRow + 1, 2); /* Fill the rectangle back in to hide outline. */    
+            fillRectangle(hdc, pixels, m->startCol + 128, m->startRow, m->endCol + 1 + 128, m->endRow + 1, scale); /* Fill the rectangle back in to hide outline. */    
             printf("ERROR: %i, Start: (%i, %i), Color: %i\n", count, m->startCol, m->startRow, m->colorKey);
             getc(stdin); /* Pause for viewing */
         }
         free(pixels);
 
         pixels = allocSolidColor(m->endCol - m->startCol + 1, m->endRow - m->startRow + 1, pixelKey[m->colorKey]);
-        fillRectangle(hdc, pixels, m->startCol + 128, m->startRow, m->endCol + 1 + 128, m->endRow + 1, 2); /* Fill the rectangle back in to hide outline. */
+        fillRectangle(hdc, pixels, m->startCol + 128, m->startRow, m->endCol + 1 + 128, m->endRow + 1, scale); /* Fill the rectangle back in to hide outline. */
         free(pixels);
 
         n = n->next;
@@ -444,7 +447,7 @@ void testCommands(HDC hdc, uint32_t *pixelKey, int **original, int **optimized, 
     }
 }
 
-void generateCommands(struct Quad q, char **colors, uint32_t *pixelKey, int detail, HDC hdc) {
+void generateCommands(struct Quad q, char **colors, uint32_t *pixelKey, int detail, int scale, HDC hdc) {
     FILE *commands = fopen(".\\commands.txt", "w"), *pixelColors = fopen(".\\pixelColors.txt", "w");
     struct LinkedList commandQueue = {NULL, NULL};
     int i, n = 0, *layers, **originalGrid = allocGrid(), **optimizedGrid = allocGrid();
@@ -461,7 +464,7 @@ void generateCommands(struct Quad q, char **colors, uint32_t *pixelKey, int deta
     imprintGrid(&commandQueue, originalGrid);
     optimizeCommands(&commandQueue, n, detail);
     imprintGrid(&commandQueue, optimizedGrid);
-    testCommands(hdc, pixelKey, originalGrid, optimizedGrid, &commandQueue);
+    testCommands(hdc, pixelKey, originalGrid, optimizedGrid, scale, &commandQueue);
 
     while(!LL_empty(&commandQueue)) {
         fprintf(pixelColors, "%u\n", pixelKey[commandQueue.head->marker->colorKey]);
@@ -531,7 +534,7 @@ void readImage(HDC hdc, int scale, int detail, char *image, char *key) {
     for(i = 0 ; i < 128 * 128 ; i++) 
         pixels[i] = readPixel(fr, transparency);
 
-    fillRectangle(hdc, pixels, 0, 0, 128, 128, 2);
+    fillRectangle(hdc, pixels, 0, 0, 128, 128, scale);
 
     for(i = 0 ; i < 128 ; i++) {
         for(j = 0 ; j < 128 ; j++)
@@ -539,7 +542,7 @@ void readImage(HDC hdc, int scale, int detail, char *image, char *key) {
     }
 
     q = buildQuadOG(grid, 128);
-    generateCommands(q, colors, pixelKey, detail, hdc);
+    generateCommands(q, colors, pixelKey, detail, scale, hdc);
     destroyQuad(&q);
     freeGrid(grid);
     for(i = 0 ; colors[i] != NULL ; i++)
@@ -578,28 +581,48 @@ void getComboBoxText(HWND combo, char *dest) {
 void imageChange(HWND parent) {
     char image[128] = "images\\", colorKey[128] = "colorKeys\\", detailBuffer[4];
     int detail = 0;
-    HWND combo = FindWindowExW(parent, NULL, NULL, NULL);
+    HWND comboHolder = FindWindowExW(parent, NULL, NULL, NULL), combo = FindWindowExW(comboHolder, NULL, NULL, NULL), display = FindWindowExW(parent, comboHolder, NULL, NULL);
     getComboBoxText(combo, image + strlen(image));
-    combo = FindWindowExW(parent, combo, NULL, NULL);
+    combo = FindWindowExW(comboHolder, combo, NULL, NULL);
     getComboBoxText(combo, colorKey + strlen(colorKey));
-    combo = FindWindowExW(parent, combo, NULL, NULL);
+    combo = FindWindowExW(comboHolder, combo, NULL, NULL);
     getComboBoxText(combo, detailBuffer);
     sscanf(detailBuffer, "%i", &detail);
-    readImage(GetDC(parent), 2, detail, image, colorKey);
+    readImage(getDisplayDC(display), getDisplayScale(display), detail, image, colorKey);
+}
+
+LRESULT CALLBACK ContainerProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch(msg) {
+        case WM_CREATE:
+            break;
+        case WM_CLOSE:
+            PostMessageW(hwnd, WM_QUIT, 0, 0);
+            break;
+        case WM_COMMAND: {
+            SendMessageW(GetParent(hwnd), msg, wp, lp); // The window simply sends the command upstream to its parent.
+        } break;
+        case WM_SIZE: {
+
+        } break;
+        default: 
+            return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+    return 0;
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    int scale = 2;
     switch(msg) {
         case WM_CREATE: {
-            HWND combo = CreateWindowW(L"ComboBox", L"Select Image", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 0, 256, 514, 100, hwnd, NULL, NULL, NULL);
-            CreateWindowW(L"ComboBox", L"Select Color Key", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 0, 276, 264, 100, hwnd, NULL, NULL, NULL);
-            CreateWindowW(L"ComboBox", L"Select Detail", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 256, 276, 264, 100, hwnd, NULL, NULL, NULL);
-            CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_CHILD , 0, 301, 528, 75, hwnd, (HMENU)0, NULL, NULL);
+            HWND comboHolder = CreateWindowW(L"container", L"ComboHolder", WS_VISIBLE | WS_OVERLAPPED | WS_CHILD, 0, 0, 512, 50, hwnd, NULL, NULL, NULL);
+            HWND combo = CreateWindowW(L"ComboBox", L"Select Image", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 0, 0, 512, 100, comboHolder, NULL, NULL, NULL);
+            CreateWindowW(L"display", L"", WS_VISIBLE | WS_CHILD, 0, 0, 512, 256, hwnd, NULL, NULL, NULL);
+            CreateWindowW(L"ComboBox", L"Select Color Key", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 0, 25, 256, 100, comboHolder, NULL, NULL, NULL);
+            CreateWindowW(L"ComboBox", L"Select Detail", CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE, 256, 25, 256, 100, comboHolder, NULL, NULL, NULL);
+            CreateWindowW(L"Button", L"Begin", WS_VISIBLE | WS_OVERLAPPED | WS_CHILD , 0, 0, 0, 0, hwnd, (HMENU)0, NULL, NULL);
             fillComboBox(combo, "images\\images.csv");
-            combo = FindWindowExW(hwnd, combo, NULL, NULL);
+            combo = FindWindowExW(comboHolder, combo, NULL, NULL);
             fillComboBox(combo, "colorKeys\\colorKeys.csv");
-            combo = FindWindowExW(hwnd, combo, NULL, NULL);
+            combo = FindWindowExW(comboHolder, combo, NULL, NULL);
             fillComboBox(combo, "sizes.csv");
         } break;
         case WM_CLOSE:
@@ -620,7 +643,26 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     PostMessageW(hwnd, WM_NULL, 0, 0);
                 } break;
             }
-        }
+        } break;
+        case WM_SIZE: {
+            WCHAR buffer[128];
+            HWND combos = FindWindowExW(hwnd, NULL, NULL, NULL), display = FindWindowExW(hwnd, combos, NULL, NULL), button = FindWindowExW(hwnd, NULL, L"Button", NULL);
+            HWND combo = FindWindowExW(combos, NULL, NULL, NULL);
+            proportionalPosition(hwnd, display, 0.0, 0.0, 1.0, 0.7, 0.0, 0.0);
+            proportionalPosition(hwnd, combos, 0.0, 0.7, 1.0, -1.0, 0.0, 0.0);
+            proportionalPosition(combos, combo, 0.0, 0.0, 1.0, -1.0, 0.0, 0.0);
+            combo = FindWindowExW(combos, combo, NULL, NULL);
+            proportionalPosition(combos, combo, 0.0, 0.5, 0.5, -1.0, 0.0, 0.0);
+            combo = FindWindowExW(combos, combo, NULL, NULL);
+            proportionalPosition(combos, combo, 0.5, 0.5, 0.5, -1.0, 0.0, 0.0);
+            proportionalPosition(hwnd, button, 0.0, 1.0, 1.0, 0.1, 0.0, -1.0);
+            anchorPosition(hwnd, button, combos, 0, 2, 1);
+            if(wp == 2)
+                imageChange(hwnd);
+        } break;
+        case WM_EXITSIZEMOVE: {
+            PostMessageW(hwnd, WM_NULL, 0, 0);
+        } break;
         default: 
             return DefWindowProcW(hwnd, msg, wp, lp);
     }
@@ -631,16 +673,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
     int phase = 0;
     FILE *commands = NULL, *colors = NULL;
     HWND selectedWindow;
-    WNDCLASSW wc = {};
+    WNDCLASSW wc = {}, containerClass = {}, displayClass = {};
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = L"main";
     wc.lpszMenuName = L"Minecraft Image Map Maker";
     RegisterClassW(&wc);
+    containerClass.lpfnWndProc = ContainerProc;
+    containerClass.hInstance = hInstance;
+    containerClass.lpszClassName = L"container";
+    RegisterClassW(&containerClass);
+    registerDisplayClass(&displayClass, hInstance);
 
-    HWND hwnd = CreateWindowW(wc.lpszClassName, wc.lpszMenuName, WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 528, 404, NULL, NULL, NULL, NULL);
-
-    imageChange(hwnd); /* Placing an image change to help display the image when the window first pops up. */
+    HWND hwnd = CreateWindowW(wc.lpszClassName, wc.lpszMenuName, WS_OVERLAPPEDWINDOW | WS_VISIBLE, 0, 0, 528, 512, NULL, NULL, NULL, NULL);
+    HWND display = FindWindowExW(hwnd, NULL, L"display", NULL);
 
     MSG msg = {};
     msg.hwnd = hwnd;
@@ -653,7 +699,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
 
         if(phase == 0 && msg.message == WM_NULL && msg.wParam == 0)
             imageChange(hwnd);
-        if(phase == 0 && msg.message == WM_NULL && msg.wParam == 1) {
+        else if(phase == 0 && msg.message == WM_NULL && msg.wParam == 1) {
             phase = 1;
             printf("Select your window...\n");
             GetAsyncKeyState(VK_CONTROL); /* In case control was pressed before. */
@@ -663,9 +709,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR cmd, int 
             selectedWindow = selectWindow();
             commands = fopen("commands.txt", "r");
             colors = fopen("pixelColors.txt", "r");
-            clearDisplay(GetDC(hwnd));
+            clearDisplay(getDisplayDC(display), getDisplayScale(display));
         }
-        else if(phase == 2 && !progressCommands(GetDC(hwnd), selectedWindow, commands, colors)){
+        else if(phase == 2 && !progressCommands(getDisplayDC(display), selectedWindow, commands, colors, getDisplayScale(display))){
             phase = 0;
             fclose(commands);
             fclose(colors);

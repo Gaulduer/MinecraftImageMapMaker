@@ -4,6 +4,7 @@
         "stdio.h": "c",
         "stdlib.h": "c",
         "colorcounter.h": "c",
-        "linkedlist.h": "c"
+        "linkedlist.h": "c",
+        "windowutil.h": "c"
     }
 }
